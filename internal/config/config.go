@@ -134,6 +134,9 @@ func NormalizeURL(raw string) (string, error) {
 		return "", apperr.Wrap(apperr.CodeInvalidArgs, "invalid url", err, map[string]string{"url": raw})
 	}
 	u.Path = strings.TrimRight(u.Path, "/")
+	if strings.HasSuffix(u.Path, "/api/v4") {
+		u.Path = strings.TrimSuffix(u.Path, "/api/v4")
+	}
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/"), nil

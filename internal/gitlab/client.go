@@ -1,6 +1,7 @@
 package gitlab
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,6 +54,7 @@ type MergeRequest struct {
 	SHA          string `json:"sha"`
 	WebURL       string `json:"web_url"`
 	UpdatedAt    string `json:"updated_at"`
+	Description  string `json:"description,omitempty"`
 }
 
 type Discussion struct {
@@ -107,6 +109,15 @@ type Diff struct {
 	DeletedFile bool   `json:"deleted_file"`
 }
 
+type CreateMergeRequestInput struct {
+	SourceBranch       string
+	TargetBranch       string
+	Title              string
+	Description        string
+	RemoveSourceBranch bool
+	AllowCollaboration bool
+}
+
 func ProjectID(path string) string {
 	return url.PathEscape(path)
 }
@@ -123,6 +134,18 @@ func (c *Client) ListMergeRequests(ctx context.Context, repo string, branch stri
 	values := url.Values{}
 	values.Set("state", "opened")
 	values.Set("source_branch", branch)
+	return c.listMergeRequests(ctx, repo, values)
+}
+
+func (c *Client) ListMergeRequestsByBranches(ctx context.Context, repo string, sourceBranch string, targetBranch string) ([]MergeRequest, error) {
+	values := url.Values{}
+	values.Set("state", "opened")
+	values.Set("source_branch", sourceBranch)
+	values.Set("target_branch", targetBranch)
+	return c.listMergeRequests(ctx, repo, values)
+}
+
+func (c *Client) listMergeRequests(ctx context.Context, repo string, values url.Values) ([]MergeRequest, error) {
 	values.Set("per_page", "100")
 	var out []MergeRequest
 	path := fmt.Sprintf("/projects/%s/merge_requests", ProjectID(repo))
@@ -137,6 +160,28 @@ func (c *Client) ListMergeRequests(ctx context.Context, repo string, branch stri
 		return nil, err
 	}
 	return out, nil
+}
+
+func (c *Client) CreateMergeRequest(ctx context.Context, repo string, input CreateMergeRequestInput) (MergeRequest, error) {
+	values := url.Values{}
+	values.Set("source_branch", input.SourceBranch)
+	values.Set("target_branch", input.TargetBranch)
+	values.Set("title", input.Title)
+	if input.Description != "" {
+		values.Set("description", input.Description)
+	}
+	if input.RemoveSourceBranch {
+		values.Set("remove_source_branch", "true")
+	}
+	if input.AllowCollaboration {
+		values.Set("allow_collaboration", "true")
+	}
+	var mr MergeRequest
+	path := fmt.Sprintf("/projects/%s/merge_requests", ProjectID(repo))
+	if err := c.postForm(ctx, path, values, &mr); err != nil {
+		return MergeRequest{}, err
+	}
+	return mr, nil
 }
 
 func (c *Client) GetMergeRequest(ctx context.Context, repo string, iid int) (MergeRequest, error) {
@@ -185,7 +230,7 @@ func (c *Client) ListDiffs(ctx context.Context, repo string, iid int) ([]Diff, e
 }
 
 func (c *Client) get(ctx context.Context, path string, values url.Values, dst any) error {
-	data, _, err := c.request(ctx, path, values)
+	data, _, err := c.request(ctx, http.MethodGet, path, values, nil, "")
 	if err != nil {
 		return err
 	}
@@ -200,7 +245,7 @@ func (c *Client) getPaged(ctx context.Context, path string, values url.Values, c
 	for {
 		q := cloneValues(values)
 		q.Set("page", strconv.Itoa(page))
-		data, next, err := c.request(ctx, path, q)
+		data, next, err := c.request(ctx, http.MethodGet, path, q, nil, "")
 		if err != nil {
 			return err
 		}
@@ -218,7 +263,19 @@ func (c *Client) getPaged(ctx context.Context, path string, values url.Values, c
 	}
 }
 
-func (c *Client) request(ctx context.Context, path string, values url.Values) ([]byte, string, error) {
+func (c *Client) postForm(ctx context.Context, path string, values url.Values, dst any) error {
+	body := bytes.NewBufferString(values.Encode())
+	data, _, err := c.request(ctx, http.MethodPost, path, nil, body, "application/x-www-form-urlencoded")
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, dst); err != nil {
+		return apperr.Wrap(apperr.CodeGitLabAPI, "decode GitLab response", err, nil)
+	}
+	return nil
+}
+
+func (c *Client) request(ctx context.Context, method string, path string, values url.Values, bodyReader io.Reader, contentType string) ([]byte, string, error) {
 	u, err := url.Parse(c.baseURL + "/api/v4" + path)
 	if err != nil {
 		return nil, "", apperr.Wrap(apperr.CodeGitLabAPI, "build GitLab request url", err, nil)
@@ -226,16 +283,23 @@ func (c *Client) request(ctx context.Context, path string, values url.Values) ([
 	if values != nil {
 		u.RawQuery = values.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), bodyReader)
 	if err != nil {
 		return nil, "", apperr.Wrap(apperr.CodeGitLabAPI, "build GitLab request", err, nil)
 	}
 	req.Header.Set("PRIVATE-TOKEN", c.token)
 	req.Header.Set("Accept", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, "", apperr.Wrap(apperr.CodeGitLabAPI, "call GitLab API", err, nil)
+		return nil, "", apperr.Wrap(apperr.CodeGitLabAPI, "call GitLab API", err, map[string]string{
+			"method": method,
+			"url":    u.Redacted(),
+			"error":  err.Error(),
+		})
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)

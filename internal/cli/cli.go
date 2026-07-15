@@ -22,8 +22,8 @@ import (
 
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		output.Usage(stderr, "usage: gitlab-proxy <bootstrap|config|import|export|comments|mr-context> [flags]")
-		return apperr.ExitInvalidArgs
+		writeHelp(stdout, "")
+		return apperr.ExitOK
 	}
 	if err := run(args, stdin, stdout); err != nil {
 		output.Error(stderr, err)
@@ -33,6 +33,23 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
+	if args[0] == "--help" || args[0] == "-h" {
+		writeHelp(stdout, "")
+		return nil
+	}
+	if args[0] == "help" {
+		topic := ""
+		if len(args) > 2 {
+			return apperr.New(apperr.CodeInvalidArgs, "usage: gitlab-proxy help [command]", map[string][]string{"args": args[1:]})
+		}
+		if len(args) == 2 {
+			topic = args[1]
+		}
+		return writeHelp(stdout, topic)
+	}
+	if hasHelpFlag(args[1:]) {
+		return writeHelp(stdout, args[0])
+	}
 	switch args[0] {
 	case "bootstrap":
 		return runBootstrap(args[1:], stdin, stdout)
@@ -46,6 +63,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runComments(args[1:], stdout)
 	case "mr-context":
 		return runMRContext(args[1:], stdout)
+	case "create-mr":
+		return runCreateMR(args[1:], stdout)
 	default:
 		return apperr.New(apperr.CodeInvalidArgs, "unknown command", map[string]string{"command": args[0]})
 	}
@@ -201,6 +220,42 @@ func runMRContext(args []string, stdout io.Writer) error {
 	return output.JSON(stdout, ctxData)
 }
 
+func runCreateMR(args []string, stdout io.Writer) error {
+	fs := newFlagSet("create-mr")
+	hostName := fs.String("host-name", "", "configured host name")
+	repo := fs.String("repo", "", "GitLab project path")
+	sourceBranch := fs.String("source-branch", "", "source branch")
+	targetBranch := fs.String("target-branch", "", "target branch")
+	title := fs.String("title", "", "merge request title")
+	description := fs.String("description", "", "merge request description")
+	removeSourceBranch := fs.Bool("remove-source-branch", false, "remove source branch after merge")
+	allowCollaboration := fs.Bool("allow-collaboration", false, "allow target project members to push to source branch")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if *hostName == "" || *repo == "" || *sourceBranch == "" || *targetBranch == "" || *title == "" {
+		return apperr.New(apperr.CodeInvalidArgs, "--host-name, --repo, --source-branch, --target-branch and --title are required", nil)
+	}
+	client, err := clientForHost(*hostName)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := review.CreateMergeRequest(ctx, client, *repo, review.CreateMergeRequestInput{
+		SourceBranch:       *sourceBranch,
+		TargetBranch:       *targetBranch,
+		Title:              *title,
+		Description:        *description,
+		RemoveSourceBranch: *removeSourceBranch,
+		AllowCollaboration: *allowCollaboration,
+	})
+	if err != nil {
+		return err
+	}
+	return output.JSON(stdout, result)
+}
+
 type reviewOptions struct {
 	HostName        string
 	Repo            string
@@ -274,6 +329,110 @@ func parse(fs *flag.FlagSet, args []string) error {
 		return apperr.New(apperr.CodeInvalidArgs, "unexpected positional arguments", map[string][]string{"args": fs.Args()})
 	}
 	return nil
+}
+
+func hasHelpFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
+func writeHelp(stdout io.Writer, topic string) error {
+	if topic == "" {
+		_, _ = fmt.Fprint(stdout, rootHelp)
+		return nil
+	}
+	text, ok := commandHelp[topic]
+	if !ok {
+		return apperr.New(apperr.CodeInvalidArgs, "unknown help topic", map[string]string{"topic": topic})
+	}
+	_, _ = fmt.Fprint(stdout, text)
+	return nil
+}
+
+const rootHelp = `gitlab-proxy is a JSON-first GitLab helper for Codex review workflows.
+
+Usage:
+  gitlab-proxy help [command]
+  gitlab-proxy <command> --help
+  gitlab-proxy <command> [flags]
+
+Commands:
+  bootstrap   Configure a GitLab host and verify the token.
+  config      Print configured GitLab hosts without tokens.
+  import      Replace local configuration from a JSON file.
+  export      Export local configuration.
+  comments    Print unresolved merge request comments as JSON.
+  mr-context  Print merge request metadata, diffs and comments as JSON.
+  create-mr   Create or reuse an opened merge request.
+
+Examples:
+  gitlab-proxy help mr-context
+  gitlab-proxy config
+`
+
+var commandHelp = map[string]string{
+	"bootstrap": `Usage:
+  gitlab-proxy bootstrap --interactive
+  gitlab-proxy bootstrap --url <url> --token <token> --name <name>
+
+Configure a GitLab host. Host name must contain only English letters and be at most 100 characters.
+The token is verified with GET /api/v4/user before saving.
+
+Example:
+  gitlab-proxy bootstrap --url https://gitlab.example.com --token glpat-... --name Main
+`,
+	"config": `Usage:
+  gitlab-proxy config
+
+Print configured GitLab hosts as JSON. Tokens are never printed.
+
+Example:
+  gitlab-proxy config
+`,
+	"import": `Usage:
+  gitlab-proxy import --path <file>
+
+Replace the current configuration with a validated JSON config file.
+
+Example:
+  gitlab-proxy import --path config.json
+`,
+	"export": `Usage:
+  gitlab-proxy export [--output-path <file>] [--include-secrets]
+
+Export the current configuration. Tokens are masked unless --include-secrets is passed.
+
+Example:
+  gitlab-proxy export --output-path config.json
+`,
+	"comments": `Usage:
+  gitlab-proxy comments --host-name <name> --repo <project-path> (--branch <branch> | --mr-iid <iid>) [--include-resolved]
+
+Print merge request comments as JSON. By default only unresolved resolvable comments are returned.
+
+Example:
+  gitlab-proxy comments --host-name Main --repo group/project --branch feature/review
+`,
+	"mr-context": `Usage:
+  gitlab-proxy mr-context --host-name <name> --repo <project-path> (--branch <branch> | --mr-iid <iid>) [--include-resolved]
+
+Print merge request metadata, diffs and comments as one JSON object.
+
+Example:
+  gitlab-proxy mr-context --host-name Main --repo group/project --branch feature/review
+`,
+	"create-mr": `Usage:
+  gitlab-proxy create-mr --host-name <name> --repo <project-path> --source-branch <branch> --target-branch <branch> --title <title> [--description <text>] [--remove-source-branch] [--allow-collaboration]
+
+Create an opened merge request or return an existing opened MR with the same source and target branches.
+
+Example:
+  gitlab-proxy create-mr --host-name Main --repo group/project --source-branch feature-comments-fix --target-branch feature --title "Fix review comments for feature"
+`,
 }
 
 type bootstrapInput struct {

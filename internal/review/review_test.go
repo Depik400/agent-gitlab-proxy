@@ -13,9 +13,15 @@ type fakeClient struct {
 	mr          gitlab.MergeRequest
 	discussions []gitlab.Discussion
 	diffs       []gitlab.Diff
+	createdMR   gitlab.MergeRequest
+	createInput gitlab.CreateMergeRequestInput
 }
 
 func (f fakeClient) ListMergeRequests(context.Context, string, string) ([]gitlab.MergeRequest, error) {
+	return f.mrs, nil
+}
+
+func (f fakeClient) ListMergeRequestsByBranches(context.Context, string, string, string) ([]gitlab.MergeRequest, error) {
 	return f.mrs, nil
 }
 
@@ -29,6 +35,10 @@ func (f fakeClient) ListDiscussions(context.Context, string, int) ([]gitlab.Disc
 
 func (f fakeClient) ListDiffs(context.Context, string, int) ([]gitlab.Diff, error) {
 	return f.diffs, nil
+}
+
+func (f fakeClient) CreateMergeRequest(context.Context, string, gitlab.CreateMergeRequestInput) (gitlab.MergeRequest, error) {
+	return f.createdMR, nil
 }
 
 func TestResolveMRAmbiguous(t *testing.T) {
@@ -80,5 +90,57 @@ func TestFlattenCommentsIncludeResolved(t *testing.T) {
 	got := FlattenComments("group/project", mr, discussions, true)
 	if len(got) != 3 {
 		t.Fatalf("len = %d", len(got))
+	}
+}
+
+func TestCreateMergeRequestCreatesWhenNoneExists(t *testing.T) {
+	got, err := CreateMergeRequest(context.Background(), fakeClient{
+		createdMR: gitlab.MergeRequest{IID: 10, SourceBranch: "feature-fix", TargetBranch: "feature"},
+	}, "group/project", CreateMergeRequestInput{
+		SourceBranch: "feature-fix",
+		TargetBranch: "feature",
+		Title:        "Fix comments",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Created || got.MergeRequest.IID != 10 {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestCreateMergeRequestReusesExisting(t *testing.T) {
+	got, err := CreateMergeRequest(context.Background(), fakeClient{
+		mrs: []gitlab.MergeRequest{{IID: 11, SourceBranch: "feature-fix", TargetBranch: "feature"}},
+	}, "group/project", CreateMergeRequestInput{
+		SourceBranch: "feature-fix",
+		TargetBranch: "feature",
+		Title:        "Fix comments",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Created || got.MergeRequest.IID != 11 {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestCreateMergeRequestAmbiguous(t *testing.T) {
+	_, err := CreateMergeRequest(context.Background(), fakeClient{
+		mrs: []gitlab.MergeRequest{{IID: 1}, {IID: 2}},
+	}, "group/project", CreateMergeRequestInput{
+		SourceBranch: "feature-fix",
+		TargetBranch: "feature",
+		Title:        "Fix comments",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	app, ok := err.(*apperr.Error)
+	if !ok {
+		t.Fatalf("error type = %T", err)
+	}
+	if app.Code != apperr.CodeAmbiguousMR {
+		t.Fatalf("code = %q", app.Code)
 	}
 }

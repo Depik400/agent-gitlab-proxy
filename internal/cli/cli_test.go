@@ -63,6 +63,63 @@ func TestRunUnknownCommandReturnsJSONError(t *testing.T) {
 	}
 }
 
+func TestRunHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"help"}, strings.NewReader(""), &stdout, &stderr)
+	if code != apperr.ExitOK {
+		t.Fatalf("code = %d stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "create-mr") {
+		t.Fatalf("help = %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func TestRunHelpTopic(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"help", "comments"}, strings.NewReader(""), &stdout, &stderr)
+	if code != apperr.ExitOK {
+		t.Fatalf("code = %d stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "gitlab-proxy comments") {
+		t.Fatalf("help = %s", stdout.String())
+	}
+}
+
+func TestRunCommandHelpFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"comments", "--help"}, strings.NewReader(""), &stdout, &stderr)
+	if code != apperr.ExitOK {
+		t.Fatalf("code = %d stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "--include-resolved") {
+		t.Fatalf("help = %s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func TestRunUnknownHelpTopicReturnsJSONError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"help", "missing"}, strings.NewReader(""), &stdout, &stderr)
+	if code != apperr.ExitInvalidArgs {
+		t.Fatalf("code = %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+	var got apperr.Error
+	if err := json.Unmarshal(stderr.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Code != apperr.CodeInvalidArgs {
+		t.Fatalf("error code = %q", got.Code)
+	}
+}
+
 func writeTestConfig(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")

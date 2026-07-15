@@ -10,9 +10,11 @@ import (
 
 type GitLabClient interface {
 	ListMergeRequests(ctx context.Context, repo string, branch string) ([]gitlab.MergeRequest, error)
+	ListMergeRequestsByBranches(ctx context.Context, repo string, sourceBranch string, targetBranch string) ([]gitlab.MergeRequest, error)
 	GetMergeRequest(ctx context.Context, repo string, iid int) (gitlab.MergeRequest, error)
 	ListDiscussions(ctx context.Context, repo string, iid int) ([]gitlab.Discussion, error)
 	ListDiffs(ctx context.Context, repo string, iid int) ([]gitlab.Diff, error)
+	CreateMergeRequest(ctx context.Context, repo string, input gitlab.CreateMergeRequestInput) (gitlab.MergeRequest, error)
 }
 
 type MRSelector struct {
@@ -55,6 +57,21 @@ type Context struct {
 	MergeRequest gitlab.MergeRequest `json:"merge_request"`
 	Diffs        []gitlab.Diff       `json:"diffs"`
 	Comments     []Comment           `json:"comments"`
+}
+
+type CreateMergeRequestInput struct {
+	SourceBranch       string
+	TargetBranch       string
+	Title              string
+	Description        string
+	RemoveSourceBranch bool
+	AllowCollaboration bool
+}
+
+type CreateMergeRequestResult struct {
+	Created      bool                `json:"created"`
+	Repo         string              `json:"repo"`
+	MergeRequest gitlab.MergeRequest `json:"merge_request"`
 }
 
 func ResolveMR(ctx context.Context, client GitLabClient, repo string, selector MRSelector) (gitlab.MergeRequest, error) {
@@ -121,6 +138,48 @@ func MRContext(ctx context.Context, client GitLabClient, hostName, repo string, 
 		Diffs:        diffs,
 		Comments:     FlattenComments(repo, mr, discussions, includeResolved),
 	}, nil
+}
+
+func CreateMergeRequest(ctx context.Context, client GitLabClient, repo string, input CreateMergeRequestInput) (CreateMergeRequestResult, error) {
+	mrs, err := client.ListMergeRequestsByBranches(ctx, repo, input.SourceBranch, input.TargetBranch)
+	if err != nil {
+		return CreateMergeRequestResult{}, err
+	}
+	switch len(mrs) {
+	case 0:
+		mr, err := client.CreateMergeRequest(ctx, repo, gitlab.CreateMergeRequestInput{
+			SourceBranch:       input.SourceBranch,
+			TargetBranch:       input.TargetBranch,
+			Title:              input.Title,
+			Description:        input.Description,
+			RemoveSourceBranch: input.RemoveSourceBranch,
+			AllowCollaboration: input.AllowCollaboration,
+		})
+		if err != nil {
+			return CreateMergeRequestResult{}, err
+		}
+		return CreateMergeRequestResult{Created: true, Repo: repo, MergeRequest: mr}, nil
+	case 1:
+		return CreateMergeRequestResult{Created: false, Repo: repo, MergeRequest: mrs[0]}, nil
+	default:
+		candidates := make([]Candidate, 0, len(mrs))
+		for _, mr := range mrs {
+			candidates = append(candidates, Candidate{
+				IID:          mr.IID,
+				Title:        mr.Title,
+				WebURL:       mr.WebURL,
+				SourceBranch: mr.SourceBranch,
+				TargetBranch: mr.TargetBranch,
+				UpdatedAt:    mr.UpdatedAt,
+			})
+		}
+		return CreateMergeRequestResult{}, apperr.New(apperr.CodeAmbiguousMR, "multiple opened merge requests found for source and target branches", map[string]any{
+			"repo":          repo,
+			"source_branch": input.SourceBranch,
+			"target_branch": input.TargetBranch,
+			"candidates":    candidates,
+		})
+	}
 }
 
 func FlattenComments(repo string, mr gitlab.MergeRequest, discussions []gitlab.Discussion, includeResolved bool) []Comment {

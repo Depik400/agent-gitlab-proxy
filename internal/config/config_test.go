@@ -16,6 +16,16 @@ func TestNormalizeURL(t *testing.T) {
 	}
 }
 
+func TestNormalizeURLTrimsAPIPath(t *testing.T) {
+	got, err := NormalizeURL("https://gitlab.example.com/api/v4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://gitlab.example.com" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestValidateHostName(t *testing.T) {
 	tests := []struct {
 		name    string
