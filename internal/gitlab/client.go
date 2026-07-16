@@ -62,6 +62,16 @@ type Discussion struct {
 	Notes []Note `json:"notes"`
 }
 
+type MergeRequestVersion struct {
+	ID             int    `json:"id"`
+	HeadCommitSHA  string `json:"head_commit_sha"`
+	BaseCommitSHA  string `json:"base_commit_sha"`
+	StartCommitSHA string `json:"start_commit_sha"`
+	CreatedAt      string `json:"created_at"`
+	State          string `json:"state"`
+	RealSize       string `json:"real_size"`
+}
+
 type Note struct {
 	ID          int          `json:"id"`
 	Body        string       `json:"body"`
@@ -116,6 +126,17 @@ type CreateMergeRequestInput struct {
 	Description        string
 	RemoveSourceBranch bool
 	AllowCollaboration bool
+}
+
+type CreateMergeRequestDiscussionInput struct {
+	Body     string
+	BaseSHA  string
+	StartSHA string
+	HeadSHA  string
+	OldPath  string
+	NewPath  string
+	OldLine  int
+	NewLine  int
 }
 
 func ProjectID(path string) string {
@@ -211,6 +232,24 @@ func (c *Client) ListDiscussions(ctx context.Context, repo string, iid int) ([]D
 	return out, nil
 }
 
+func (c *Client) ListMergeRequestVersions(ctx context.Context, repo string, iid int) ([]MergeRequestVersion, error) {
+	values := url.Values{}
+	values.Set("per_page", "100")
+	var out []MergeRequestVersion
+	path := fmt.Sprintf("/projects/%s/merge_requests/%d/versions", ProjectID(repo), iid)
+	if err := c.getPaged(ctx, path, values, func(data []byte) error {
+		var page []MergeRequestVersion
+		if err := json.Unmarshal(data, &page); err != nil {
+			return err
+		}
+		out = append(out, page...)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *Client) ListDiffs(ctx context.Context, repo string, iid int) ([]Diff, error) {
 	values := url.Values{}
 	values.Set("per_page", "100")
@@ -227,6 +266,40 @@ func (c *Client) ListDiffs(ctx context.Context, repo string, iid int) ([]Diff, e
 		return nil, err
 	}
 	return out, nil
+}
+
+func (c *Client) AddMergeRequestNote(ctx context.Context, repo string, iid int, body string) (Note, error) {
+	values := url.Values{}
+	values.Set("body", body)
+	var note Note
+	path := fmt.Sprintf("/projects/%s/merge_requests/%d/notes", ProjectID(repo), iid)
+	if err := c.postForm(ctx, path, values, &note); err != nil {
+		return Note{}, err
+	}
+	return note, nil
+}
+
+func (c *Client) CreateMergeRequestDiscussion(ctx context.Context, repo string, iid int, input CreateMergeRequestDiscussionInput) (Discussion, error) {
+	values := url.Values{}
+	values.Set("body", input.Body)
+	values.Set("position[position_type]", "text")
+	values.Set("position[base_sha]", input.BaseSHA)
+	values.Set("position[start_sha]", input.StartSHA)
+	values.Set("position[head_sha]", input.HeadSHA)
+	values.Set("position[old_path]", input.OldPath)
+	values.Set("position[new_path]", input.NewPath)
+	if input.OldLine > 0 {
+		values.Set("position[old_line]", strconv.Itoa(input.OldLine))
+	}
+	if input.NewLine > 0 {
+		values.Set("position[new_line]", strconv.Itoa(input.NewLine))
+	}
+	var discussion Discussion
+	path := fmt.Sprintf("/projects/%s/merge_requests/%d/discussions", ProjectID(repo), iid)
+	if err := c.postForm(ctx, path, values, &discussion); err != nil {
+		return Discussion{}, err
+	}
+	return discussion, nil
 }
 
 func (c *Client) get(ctx context.Context, path string, values url.Values, dst any) error {

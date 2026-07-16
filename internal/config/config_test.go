@@ -49,8 +49,9 @@ func TestValidateHostName(t *testing.T) {
 func TestSaveLoadAndMask(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := Config{
-		Version: Version,
-		Hosts:   []Host{{Name: "Main", URL: "https://gitlab.example.com", Token: "secret"}},
+		Version:     Version,
+		DefaultHost: "Main",
+		Hosts:       []Host{{Name: "Main", URL: "https://gitlab.example.com", Token: "secret"}},
 	}
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)
@@ -77,12 +78,30 @@ func TestSaveLoadAndMask(t *testing.T) {
 
 func TestUpsertHost(t *testing.T) {
 	cfg := Empty()
-	cfg = UpsertHost(cfg, Host{Name: "Main", URL: "https://one.example.com", Token: "one"})
-	cfg = UpsertHost(cfg, Host{Name: "Main", URL: "https://two.example.com", Token: "two"})
+	cfg = UpsertHost(cfg, Host{Name: "Main", URL: "https://one.example.com", Token: "one"}, false)
+	cfg = UpsertHost(cfg, Host{Name: "Main", URL: "https://two.example.com", Token: "two"}, false)
 	if len(cfg.Hosts) != 1 {
 		t.Fatalf("hosts len = %d", len(cfg.Hosts))
 	}
 	if cfg.Hosts[0].URL != "https://two.example.com" {
 		t.Fatalf("url = %q", cfg.Hosts[0].URL)
+	}
+	if cfg.DefaultHost != "Main" {
+		t.Fatalf("default host = %q", cfg.DefaultHost)
+	}
+}
+
+func TestResolveHostUsesDefault(t *testing.T) {
+	cfg := Config{
+		Version:     Version,
+		DefaultHost: "Main",
+		Hosts:       []Host{{Name: "Main", URL: "https://gitlab.example.com", Token: "secret"}},
+	}
+	host, err := ResolveHost(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Name != "Main" {
+		t.Fatalf("host = %q", host.Name)
 	}
 }

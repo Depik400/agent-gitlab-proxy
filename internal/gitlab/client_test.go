@@ -118,6 +118,97 @@ func TestCreateMergeRequest(t *testing.T) {
 	}
 }
 
+func TestAddMergeRequestNote(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q", r.Method)
+		}
+		if r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/3/notes" {
+			t.Fatalf("path = %q", r.URL.EscapedPath())
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.Form.Get("body"); got != "Review comment" {
+			t.Fatalf("body = %q", got)
+		}
+		return jsonResponse(201, `{"id":99,"body":"Review comment"}`, ""), nil
+	})
+	client := NewClientWithHTTP("https://gitlab.example.com", "token", &http.Client{Transport: transport})
+	note, err := client.AddMergeRequestNote(context.Background(), "group/project", 3, "Review comment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note.ID != 99 || note.Body != "Review comment" {
+		t.Fatalf("note = %+v", note)
+	}
+}
+
+func TestListMergeRequestVersions(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/3/versions" {
+			t.Fatalf("path = %q", r.URL.EscapedPath())
+		}
+		return jsonResponse(200, `[{"id":7,"base_commit_sha":"base","start_commit_sha":"start","head_commit_sha":"head"}]`, ""), nil
+	})
+	client := NewClientWithHTTP("https://gitlab.example.com", "token", &http.Client{Transport: transport})
+	versions, err := client.ListMergeRequestVersions(context.Background(), "group/project", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 1 || versions[0].HeadCommitSHA != "head" {
+		t.Fatalf("versions = %+v", versions)
+	}
+}
+
+func TestCreateMergeRequestDiscussion(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q", r.Method)
+		}
+		if r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/3/discussions" {
+			t.Fatalf("path = %q", r.URL.EscapedPath())
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]string{
+			"body":                    "Review comment",
+			"position[position_type]": "text",
+			"position[base_sha]":      "base",
+			"position[start_sha]":     "start",
+			"position[head_sha]":      "head",
+			"position[old_path]":      "old.go",
+			"position[new_path]":      "new.go",
+			"position[old_line]":      "40",
+			"position[new_line]":      "42",
+		}
+		for key, value := range want {
+			if got := r.Form.Get(key); got != value {
+				t.Fatalf("%s = %q, want %q", key, got, value)
+			}
+		}
+		return jsonResponse(201, `{"id":"discussion-1","notes":[{"id":99,"body":"Review comment"}]}`, ""), nil
+	})
+	client := NewClientWithHTTP("https://gitlab.example.com", "token", &http.Client{Transport: transport})
+	discussion, err := client.CreateMergeRequestDiscussion(context.Background(), "group/project", 3, CreateMergeRequestDiscussionInput{
+		Body:     "Review comment",
+		BaseSHA:  "base",
+		StartSHA: "start",
+		HeadSHA:  "head",
+		OldPath:  "old.go",
+		NewPath:  "new.go",
+		OldLine:  40,
+		NewLine:  42,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if discussion.ID != "discussion-1" || len(discussion.Notes) != 1 {
+		t.Fatalf("discussion = %+v", discussion)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

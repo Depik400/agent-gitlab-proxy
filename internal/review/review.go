@@ -13,8 +13,11 @@ type GitLabClient interface {
 	ListMergeRequestsByBranches(ctx context.Context, repo string, sourceBranch string, targetBranch string) ([]gitlab.MergeRequest, error)
 	GetMergeRequest(ctx context.Context, repo string, iid int) (gitlab.MergeRequest, error)
 	ListDiscussions(ctx context.Context, repo string, iid int) ([]gitlab.Discussion, error)
+	ListMergeRequestVersions(ctx context.Context, repo string, iid int) ([]gitlab.MergeRequestVersion, error)
 	ListDiffs(ctx context.Context, repo string, iid int) ([]gitlab.Diff, error)
 	CreateMergeRequest(ctx context.Context, repo string, input gitlab.CreateMergeRequestInput) (gitlab.MergeRequest, error)
+	AddMergeRequestNote(ctx context.Context, repo string, iid int, body string) (gitlab.Note, error)
+	CreateMergeRequestDiscussion(ctx context.Context, repo string, iid int, input gitlab.CreateMergeRequestDiscussionInput) (gitlab.Discussion, error)
 }
 
 type MRSelector struct {
@@ -72,6 +75,27 @@ type CreateMergeRequestResult struct {
 	Created      bool                `json:"created"`
 	Repo         string              `json:"repo"`
 	MergeRequest gitlab.MergeRequest `json:"merge_request"`
+}
+
+type AddMergeRequestCommentResult struct {
+	Repo         string              `json:"repo"`
+	MergeRequest gitlab.MergeRequest `json:"merge_request"`
+	Note         gitlab.Note         `json:"note"`
+}
+
+type AddMergeRequestThreadInput struct {
+	Body    string
+	File    string
+	OldFile string
+	NewLine int
+	OldLine int
+}
+
+type AddMergeRequestThreadResult struct {
+	Repo         string              `json:"repo"`
+	MergeRequest gitlab.MergeRequest `json:"merge_request"`
+	Discussion   gitlab.Discussion   `json:"discussion"`
+	Position     map[string]any      `json:"position"`
 }
 
 func ResolveMR(ctx context.Context, client GitLabClient, repo string, selector MRSelector) (gitlab.MergeRequest, error) {
@@ -180,6 +204,79 @@ func CreateMergeRequest(ctx context.Context, client GitLabClient, repo string, i
 			"candidates":    candidates,
 		})
 	}
+}
+
+func AddMergeRequestComment(ctx context.Context, client GitLabClient, repo string, selector MRSelector, body string) (AddMergeRequestCommentResult, error) {
+	if body == "" {
+		return AddMergeRequestCommentResult{}, apperr.New(apperr.CodeInvalidArgs, "--body is required", nil)
+	}
+	mr, err := ResolveMR(ctx, client, repo, selector)
+	if err != nil {
+		return AddMergeRequestCommentResult{}, err
+	}
+	note, err := client.AddMergeRequestNote(ctx, repo, mr.IID, body)
+	if err != nil {
+		return AddMergeRequestCommentResult{}, err
+	}
+	return AddMergeRequestCommentResult{Repo: repo, MergeRequest: mr, Note: note}, nil
+}
+
+func AddMergeRequestThread(ctx context.Context, client GitLabClient, repo string, selector MRSelector, input AddMergeRequestThreadInput) (AddMergeRequestThreadResult, error) {
+	if input.Body == "" {
+		return AddMergeRequestThreadResult{}, apperr.New(apperr.CodeInvalidArgs, "--body is required", nil)
+	}
+	if input.File == "" {
+		return AddMergeRequestThreadResult{}, apperr.New(apperr.CodeInvalidArgs, "--file is required", nil)
+	}
+	if input.NewLine <= 0 && input.OldLine <= 0 {
+		return AddMergeRequestThreadResult{}, apperr.New(apperr.CodeInvalidArgs, "at least one of --new-line or --old-line is required", nil)
+	}
+	oldFile := input.OldFile
+	if oldFile == "" {
+		oldFile = input.File
+	}
+	mr, err := ResolveMR(ctx, client, repo, selector)
+	if err != nil {
+		return AddMergeRequestThreadResult{}, err
+	}
+	versions, err := client.ListMergeRequestVersions(ctx, repo, mr.IID)
+	if err != nil {
+		return AddMergeRequestThreadResult{}, err
+	}
+	if len(versions) == 0 {
+		return AddMergeRequestThreadResult{}, apperr.New(apperr.CodeNotFound, "merge request versions not found", map[string]any{"repo": repo, "mr_iid": mr.IID})
+	}
+	version := versions[0]
+	if version.BaseCommitSHA == "" || version.StartCommitSHA == "" || version.HeadCommitSHA == "" {
+		return AddMergeRequestThreadResult{}, apperr.New(apperr.CodeGitLabAPI, "latest merge request version is missing position SHAs", map[string]any{"repo": repo, "mr_iid": mr.IID, "version_id": version.ID})
+	}
+	discussion, err := client.CreateMergeRequestDiscussion(ctx, repo, mr.IID, gitlab.CreateMergeRequestDiscussionInput{
+		Body:     input.Body,
+		BaseSHA:  version.BaseCommitSHA,
+		StartSHA: version.StartCommitSHA,
+		HeadSHA:  version.HeadCommitSHA,
+		OldPath:  oldFile,
+		NewPath:  input.File,
+		OldLine:  input.OldLine,
+		NewLine:  input.NewLine,
+	})
+	if err != nil {
+		return AddMergeRequestThreadResult{}, err
+	}
+	return AddMergeRequestThreadResult{
+		Repo:         repo,
+		MergeRequest: mr,
+		Discussion:   discussion,
+		Position: map[string]any{
+			"base_sha":  version.BaseCommitSHA,
+			"start_sha": version.StartCommitSHA,
+			"head_sha":  version.HeadCommitSHA,
+			"old_path":  oldFile,
+			"new_path":  input.File,
+			"old_line":  input.OldLine,
+			"new_line":  input.NewLine,
+		},
+	}, nil
 }
 
 func FlattenComments(repo string, mr gitlab.MergeRequest, discussions []gitlab.Discussion, includeResolved bool) []Comment {

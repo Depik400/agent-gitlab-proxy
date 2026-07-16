@@ -21,8 +21,9 @@ const (
 var nameRE = regexp.MustCompile(`^[A-Za-z]{1,100}$`)
 
 type Config struct {
-	Version int    `json:"version"`
-	Hosts   []Host `json:"hosts"`
+	Version     int    `json:"version"`
+	DefaultHost string `json:"default_host,omitempty"`
+	Hosts       []Host `json:"hosts"`
 }
 
 type Host struct {
@@ -104,6 +105,11 @@ func Validate(cfg Config) error {
 		}
 		seen[host.Name] = struct{}{}
 	}
+	if cfg.DefaultHost != "" {
+		if _, ok := seen[cfg.DefaultHost]; !ok {
+			return apperr.New(apperr.CodeConfig, "default host is not configured", map[string]string{"default_host": cfg.DefaultHost})
+		}
+	}
 	return nil
 }
 
@@ -142,14 +148,20 @@ func NormalizeURL(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-func UpsertHost(cfg Config, host Host) Config {
+func UpsertHost(cfg Config, host Host, makeDefault bool) Config {
 	for i := range cfg.Hosts {
 		if cfg.Hosts[i].Name == host.Name {
 			cfg.Hosts[i] = host
+			if makeDefault || cfg.DefaultHost == "" {
+				cfg.DefaultHost = host.Name
+			}
 			return cfg
 		}
 	}
 	cfg.Hosts = append(cfg.Hosts, host)
+	if makeDefault || cfg.DefaultHost == "" {
+		cfg.DefaultHost = host.Name
+	}
 	return cfg
 }
 
@@ -160,6 +172,16 @@ func FindHost(cfg Config, name string) (Host, error) {
 		}
 	}
 	return Host{}, apperr.New(apperr.CodeConfig, "host is not configured", map[string]string{"host_name": name})
+}
+
+func ResolveHost(cfg Config, name string) (Host, error) {
+	if name != "" {
+		return FindHost(cfg, name)
+	}
+	if cfg.DefaultHost == "" {
+		return Host{}, apperr.New(apperr.CodeConfig, "host name is required when default_host is not configured", nil)
+	}
+	return FindHost(cfg, cfg.DefaultHost)
 }
 
 func Mask(cfg Config) Config {

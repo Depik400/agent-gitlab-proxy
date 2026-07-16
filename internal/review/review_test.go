@@ -13,8 +13,11 @@ type fakeClient struct {
 	mr          gitlab.MergeRequest
 	discussions []gitlab.Discussion
 	diffs       []gitlab.Diff
+	versions    []gitlab.MergeRequestVersion
 	createdMR   gitlab.MergeRequest
 	createInput gitlab.CreateMergeRequestInput
+	note        gitlab.Note
+	discussion  gitlab.Discussion
 }
 
 func (f fakeClient) ListMergeRequests(context.Context, string, string) ([]gitlab.MergeRequest, error) {
@@ -37,8 +40,20 @@ func (f fakeClient) ListDiffs(context.Context, string, int) ([]gitlab.Diff, erro
 	return f.diffs, nil
 }
 
+func (f fakeClient) ListMergeRequestVersions(context.Context, string, int) ([]gitlab.MergeRequestVersion, error) {
+	return f.versions, nil
+}
+
 func (f fakeClient) CreateMergeRequest(context.Context, string, gitlab.CreateMergeRequestInput) (gitlab.MergeRequest, error) {
 	return f.createdMR, nil
+}
+
+func (f fakeClient) AddMergeRequestNote(context.Context, string, int, string) (gitlab.Note, error) {
+	return f.note, nil
+}
+
+func (f fakeClient) CreateMergeRequestDiscussion(context.Context, string, int, gitlab.CreateMergeRequestDiscussionInput) (gitlab.Discussion, error) {
+	return f.discussion, nil
 }
 
 func TestResolveMRAmbiguous(t *testing.T) {
@@ -142,5 +157,44 @@ func TestCreateMergeRequestAmbiguous(t *testing.T) {
 	}
 	if app.Code != apperr.CodeAmbiguousMR {
 		t.Fatalf("code = %q", app.Code)
+	}
+}
+
+func TestAddMergeRequestComment(t *testing.T) {
+	got, err := AddMergeRequestComment(context.Background(), fakeClient{
+		mr:   gitlab.MergeRequest{IID: 12, WebURL: "https://gitlab.example.com/mr/12"},
+		note: gitlab.Note{ID: 99, Body: "Review comment"},
+	}, "group/project", MRSelector{MRIID: 12}, "Review comment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MergeRequest.IID != 12 || got.Note.ID != 99 {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestAddMergeRequestThread(t *testing.T) {
+	got, err := AddMergeRequestThread(context.Background(), fakeClient{
+		mr: gitlab.MergeRequest{IID: 12, WebURL: "https://gitlab.example.com/mr/12"},
+		versions: []gitlab.MergeRequestVersion{{
+			ID:             1,
+			BaseCommitSHA:  "base",
+			StartCommitSHA: "start",
+			HeadCommitSHA:  "head",
+		}},
+		discussion: gitlab.Discussion{ID: "discussion-1"},
+	}, "group/project", MRSelector{MRIID: 12}, AddMergeRequestThreadInput{
+		Body:    "Review comment",
+		File:    "main.go",
+		NewLine: 42,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MergeRequest.IID != 12 || got.Discussion.ID != "discussion-1" {
+		t.Fatalf("result = %+v", got)
+	}
+	if got.Position["new_path"] != "main.go" || got.Position["new_line"] != 42 {
+		t.Fatalf("position = %+v", got.Position)
 	}
 }

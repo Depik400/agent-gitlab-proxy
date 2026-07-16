@@ -17,7 +17,7 @@ func TestRunConfigMasksToken(t *testing.T) {
 	t.Setenv(config.EnvKey, configPath)
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"config"}, strings.NewReader(""), &stdout, &stderr)
+	code := Run([]string{"config"}, strings.NewReader(""), &stdout, &stderr, nil)
 	if code != apperr.ExitOK {
 		t.Fatalf("code = %d stderr = %s", code, stderr.String())
 	}
@@ -35,7 +35,7 @@ func TestRunExportIncludesSecretsWhenRequested(t *testing.T) {
 	t.Setenv(config.EnvKey, configPath)
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"export", "--include-secrets"}, strings.NewReader(""), &stdout, &stderr)
+	code := Run([]string{"export", "--include-secrets"}, strings.NewReader(""), &stdout, &stderr, nil)
 	if code != apperr.ExitOK {
 		t.Fatalf("code = %d stderr = %s", code, stderr.String())
 	}
@@ -50,7 +50,7 @@ func TestRunExportIncludesSecretsWhenRequested(t *testing.T) {
 
 func TestRunUnknownCommandReturnsJSONError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"unknown"}, strings.NewReader(""), &stdout, &stderr)
+	code := Run([]string{"unknown"}, strings.NewReader(""), &stdout, &stderr, nil)
 	if code != apperr.ExitInvalidArgs {
 		t.Fatalf("code = %d", code)
 	}
@@ -65,7 +65,7 @@ func TestRunUnknownCommandReturnsJSONError(t *testing.T) {
 
 func TestRunHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"help"}, strings.NewReader(""), &stdout, &stderr)
+	code := Run([]string{"help"}, strings.NewReader(""), &stdout, &stderr, nil)
 	if code != apperr.ExitOK {
 		t.Fatalf("code = %d stderr = %s", code, stderr.String())
 	}
@@ -79,7 +79,7 @@ func TestRunHelp(t *testing.T) {
 
 func TestRunHelpTopic(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"help", "comments"}, strings.NewReader(""), &stdout, &stderr)
+	code := Run([]string{"help", "comments"}, strings.NewReader(""), &stdout, &stderr, nil)
 	if code != apperr.ExitOK {
 		t.Fatalf("code = %d stderr = %s", code, stderr.String())
 	}
@@ -90,7 +90,7 @@ func TestRunHelpTopic(t *testing.T) {
 
 func TestRunCommandHelpFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"comments", "--help"}, strings.NewReader(""), &stdout, &stderr)
+	code := Run([]string{"comments", "--help"}, strings.NewReader(""), &stdout, &stderr, nil)
 	if code != apperr.ExitOK {
 		t.Fatalf("code = %d stderr = %s", code, stderr.String())
 	}
@@ -104,7 +104,7 @@ func TestRunCommandHelpFlag(t *testing.T) {
 
 func TestRunUnknownHelpTopicReturnsJSONError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"help", "missing"}, strings.NewReader(""), &stdout, &stderr)
+	code := Run([]string{"help", "missing"}, strings.NewReader(""), &stdout, &stderr, nil)
 	if code != apperr.ExitInvalidArgs {
 		t.Fatalf("code = %d", code)
 	}
@@ -120,11 +120,71 @@ func TestRunUnknownHelpTopicReturnsJSONError(t *testing.T) {
 	}
 }
 
+func TestRunInstallSkillWritesAllSkillsByDefault(t *testing.T) {
+	target := t.TempDir()
+	embedded := map[string]string{
+		"gitlab-review-comments": "---\nname: gitlab-review-comments\ndescription: test\n---\n",
+		"gitlab":                 "---\nname: gitlab\ndescription: test\n---\n",
+		"gitlab-review-branch":   "---\nname: gitlab-review-branch\ndescription: test\n---\n",
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"install-skill", "--target-dir", target}, strings.NewReader(""), &stdout, &stderr, embedded)
+	if code != apperr.ExitOK {
+		t.Fatalf("code = %d stderr = %s", code, stderr.String())
+	}
+	path := filepath.Join(target, "gitlab-review-comments", "SKILL.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "gitlab-review-comments") {
+		t.Fatalf("skill = %s", string(data))
+	}
+	path = filepath.Join(target, "gitlab", "SKILL.md")
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "name: gitlab") {
+		t.Fatalf("skill = %s", string(data))
+	}
+	path = filepath.Join(target, "gitlab-review-branch", "SKILL.md")
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "name: gitlab-review-branch") {
+		t.Fatalf("skill = %s", string(data))
+	}
+}
+
+func TestRunInstallSkillCanInstallSingleSkill(t *testing.T) {
+	target := t.TempDir()
+	embedded := map[string]string{
+		"gitlab-review-comments": "---\nname: gitlab-review-comments\ndescription: test\n---\n",
+		"gitlab":                 "---\nname: gitlab\ndescription: test\n---\n",
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"install-skill", "--target-dir", target, "--skill", "gitlab"}, strings.NewReader(""), &stdout, &stderr, embedded)
+	if code != apperr.ExitOK {
+		t.Fatalf("code = %d stderr = %s", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(target, "gitlab", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "gitlab-review-comments", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("review skill stat error = %v, want not exist", err)
+	}
+}
+
 func writeTestConfig(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := config.Config{
-		Version: config.Version,
+		Version:     config.Version,
+		DefaultHost: "Main",
 		Hosts: []config.Host{{
 			Name:  "Main",
 			URL:   "https://gitlab.example.com",

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -20,19 +22,19 @@ import (
 	"gitlab-proxy/internal/review"
 )
 
-func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, embeddedSkills map[string]string) int {
 	if len(args) == 0 {
 		writeHelp(stdout, "")
 		return apperr.ExitOK
 	}
-	if err := run(args, stdin, stdout); err != nil {
+	if err := run(args, stdin, stdout, embeddedSkills); err != nil {
 		output.Error(stderr, err)
 		return apperr.ExitCode(err)
 	}
 	return apperr.ExitOK
 }
 
-func run(args []string, stdin io.Reader, stdout io.Writer) error {
+func run(args []string, stdin io.Reader, stdout io.Writer, embeddedSkills map[string]string) error {
 	if args[0] == "--help" || args[0] == "-h" {
 		writeHelp(stdout, "")
 		return nil
@@ -53,6 +55,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	switch args[0] {
 	case "bootstrap":
 		return runBootstrap(args[1:], stdin, stdout)
+	case "set-default":
+		return runSetDefault(args[1:], stdout)
 	case "config":
 		return runConfig(args[1:], stdout)
 	case "import":
@@ -65,6 +69,12 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runMRContext(args[1:], stdout)
 	case "create-mr":
 		return runCreateMR(args[1:], stdout)
+	case "add-mr-comment":
+		return runAddMRComment(args[1:], stdout)
+	case "add-mr-thread":
+		return runAddMRThread(args[1:], stdout)
+	case "install-skill":
+		return runInstallSkill(args[1:], stdout, embeddedSkills)
 	default:
 		return apperr.New(apperr.CodeInvalidArgs, "unknown command", map[string]string{"command": args[0]})
 	}
@@ -76,6 +86,7 @@ func runBootstrap(args []string, stdin io.Reader, stdout io.Writer) error {
 	rawURL := fs.String("url", "", "GitLab URL")
 	token := fs.String("token", "", "GitLab access token")
 	name := fs.String("name", "", "host name")
+	makeDefault := fs.Bool("default", false, "make this host default")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -112,11 +123,38 @@ func runBootstrap(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cfg = config.UpsertHost(cfg, host)
+	cfg = config.UpsertHost(cfg, host, *makeDefault)
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
-	return output.JSON(stdout, map[string]any{"status": "ok", "host": config.Host{Name: host.Name, URL: host.URL}})
+	return output.JSON(stdout, map[string]any{"status": "ok", "host": config.Host{Name: host.Name, URL: host.URL}, "default_host": cfg.DefaultHost})
+}
+
+func runSetDefault(args []string, stdout io.Writer) error {
+	fs := newFlagSet("set-default")
+	hostName := fs.String("host-name", "", "configured host name")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if *hostName == "" {
+		return apperr.New(apperr.CodeInvalidArgs, "--host-name is required", nil)
+	}
+	path, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	if _, err := config.FindHost(cfg, *hostName); err != nil {
+		return err
+	}
+	cfg.DefaultHost = *hostName
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	return output.JSON(stdout, map[string]any{"status": "ok", "default_host": cfg.DefaultHost})
 }
 
 func runConfig(args []string, stdout io.Writer) error {
@@ -233,8 +271,8 @@ func runCreateMR(args []string, stdout io.Writer) error {
 	if err := parse(fs, args); err != nil {
 		return err
 	}
-	if *hostName == "" || *repo == "" || *sourceBranch == "" || *targetBranch == "" || *title == "" {
-		return apperr.New(apperr.CodeInvalidArgs, "--host-name, --repo, --source-branch, --target-branch and --title are required", nil)
+	if *repo == "" || *sourceBranch == "" || *targetBranch == "" || *title == "" {
+		return apperr.New(apperr.CodeInvalidArgs, "--repo, --source-branch, --target-branch and --title are required", nil)
 	}
 	client, err := clientForHost(*hostName)
 	if err != nil {
@@ -249,6 +287,90 @@ func runCreateMR(args []string, stdout io.Writer) error {
 		Description:        *description,
 		RemoveSourceBranch: *removeSourceBranch,
 		AllowCollaboration: *allowCollaboration,
+	})
+	if err != nil {
+		return err
+	}
+	return output.JSON(stdout, result)
+}
+
+func runAddMRComment(args []string, stdout io.Writer) error {
+	fs := newFlagSet("add-mr-comment")
+	hostName := fs.String("host-name", "", "configured host name")
+	repo := fs.String("repo", "", "GitLab project path")
+	branch := fs.String("branch", "", "source branch")
+	mrIID := fs.String("mr-iid", "", "merge request IID")
+	body := fs.String("body", "", "comment body")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if *repo == "" {
+		return apperr.New(apperr.CodeInvalidArgs, "--repo is required", nil)
+	}
+	if (*branch == "" && *mrIID == "") || (*branch != "" && *mrIID != "") {
+		return apperr.New(apperr.CodeInvalidArgs, "exactly one of --branch or --mr-iid is required", nil)
+	}
+	iid := 0
+	if *mrIID != "" {
+		parsed, err := review.ParseMRIID(*mrIID)
+		if err != nil {
+			return err
+		}
+		iid = parsed
+	}
+	client, err := clientForHost(*hostName)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := review.AddMergeRequestComment(ctx, client, *repo, review.MRSelector{Branch: *branch, MRIID: iid}, *body)
+	if err != nil {
+		return err
+	}
+	return output.JSON(stdout, result)
+}
+
+func runAddMRThread(args []string, stdout io.Writer) error {
+	fs := newFlagSet("add-mr-thread")
+	hostName := fs.String("host-name", "", "configured host name")
+	repo := fs.String("repo", "", "GitLab project path")
+	branch := fs.String("branch", "", "source branch")
+	mrIID := fs.String("mr-iid", "", "merge request IID")
+	body := fs.String("body", "", "comment body")
+	file := fs.String("file", "", "new file path in the diff")
+	oldFile := fs.String("old-file", "", "old file path in the diff for renamed files")
+	newLine := fs.Int("new-line", 0, "new line number in the diff")
+	oldLine := fs.Int("old-line", 0, "old line number in the diff")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if *repo == "" {
+		return apperr.New(apperr.CodeInvalidArgs, "--repo is required", nil)
+	}
+	if (*branch == "" && *mrIID == "") || (*branch != "" && *mrIID != "") {
+		return apperr.New(apperr.CodeInvalidArgs, "exactly one of --branch or --mr-iid is required", nil)
+	}
+	iid := 0
+	if *mrIID != "" {
+		parsed, err := review.ParseMRIID(*mrIID)
+		if err != nil {
+			return err
+		}
+		iid = parsed
+	}
+	client, err := clientForHost(*hostName)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := review.AddMergeRequestThread(ctx, client, *repo, review.MRSelector{Branch: *branch, MRIID: iid}, review.AddMergeRequestThreadInput{
+		Body:    *body,
+		File:    *file,
+		OldFile: *oldFile,
+		NewLine: *newLine,
+		OldLine: *oldLine,
 	})
 	if err != nil {
 		return err
@@ -278,8 +400,8 @@ func parseReviewFlags(name string, args []string) (reviewOptions, error) {
 	if err := parse(fs, args); err != nil {
 		return reviewOptions{}, err
 	}
-	if *hostName == "" || *repo == "" {
-		return reviewOptions{}, apperr.New(apperr.CodeInvalidArgs, "--host-name and --repo are required", nil)
+	if *repo == "" {
+		return reviewOptions{}, apperr.New(apperr.CodeInvalidArgs, "--repo is required", nil)
 	}
 	if (*branch == "" && *mrIID == "") || (*branch != "" && *mrIID != "") {
 		return reviewOptions{}, apperr.New(apperr.CodeInvalidArgs, "exactly one of --branch or --mr-iid is required", nil)
@@ -300,11 +422,63 @@ func clientForHost(hostName string) (*gitlab.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	host, err := config.FindHost(cfg, hostName)
+	host, err := config.ResolveHost(cfg, hostName)
 	if err != nil {
 		return nil, err
 	}
 	return gitlab.NewClient(host.URL, host.Token), nil
+}
+
+func runInstallSkill(args []string, stdout io.Writer, embeddedSkills map[string]string) error {
+	fs := newFlagSet("install-skill")
+	targetDir := fs.String("target-dir", "", "Codex skills directory")
+	skillName := fs.String("skill", "", "install only this embedded skill")
+	all := fs.Bool("all", false, "install all embedded skills")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	base := *targetDir
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return apperr.Wrap(apperr.CodeConfig, "resolve home dir", err, nil)
+		}
+		base = filepath.Join(home, ".codex", "skills")
+	}
+	var names []string
+	if *skillName != "" && !*all {
+		names = []string{*skillName}
+	} else {
+		for name := range embeddedSkills {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+	}
+	installed := make([]map[string]string, 0, len(names))
+	for _, name := range names {
+		content := embeddedSkills[name]
+		if strings.TrimSpace(content) == "" {
+			return apperr.New(apperr.CodeConfig, "embedded skill is empty or not found", map[string]string{"skill": name})
+		}
+		skillDir := filepath.Join(base, name)
+		if err := os.MkdirAll(skillDir, 0o700); err != nil {
+			return apperr.Wrap(apperr.CodeConfig, "create skill dir", err, map[string]string{"path": skillDir})
+		}
+		skillPath := filepath.Join(skillDir, "SKILL.md")
+		if err := os.WriteFile(skillPath, []byte(content), 0o600); err != nil {
+			return apperr.Wrap(apperr.CodeConfig, "write skill", err, map[string]string{"path": skillPath})
+		}
+		installed = append(installed, map[string]string{"name": name, "path": skillPath})
+	}
+	return output.JSON(stdout, map[string]any{
+		"status":    "ok",
+		"installed": installed,
+		"recommendations": []string{
+			"Run: gitlab-proxy config",
+			"If no host is configured, run: gitlab-proxy bootstrap --interactive",
+			"Use gitlab-proxy set-default --host-name <name> to choose the default host.",
+		},
+	})
 }
 
 func loadConfig() (config.Config, error) {
@@ -362,12 +536,16 @@ Usage:
 
 Commands:
   bootstrap   Configure a GitLab host and verify the token.
+  set-default Set default configured host.
   config      Print configured GitLab hosts without tokens.
   import      Replace local configuration from a JSON file.
   export      Export local configuration.
   comments    Print unresolved merge request comments as JSON.
   mr-context  Print merge request metadata, diffs and comments as JSON.
   create-mr   Create or reuse an opened merge request.
+  add-mr-comment Add a general comment to a merge request.
+  add-mr-thread Add a code-position thread to a merge request.
+  install-skill Install embedded Codex skills.
 
 Examples:
   gitlab-proxy help mr-context
@@ -377,18 +555,27 @@ Examples:
 var commandHelp = map[string]string{
 	"bootstrap": `Usage:
   gitlab-proxy bootstrap --interactive
-  gitlab-proxy bootstrap --url <url> --token <token> --name <name>
+  gitlab-proxy bootstrap --url <url> --token <token> --name <name> [--default]
 
 Configure a GitLab host. Host name must contain only English letters and be at most 100 characters.
 The token is verified with GET /api/v4/user before saving.
+The first configured host becomes default automatically.
 
 Example:
-  gitlab-proxy bootstrap --url https://gitlab.example.com --token glpat-... --name Main
+  gitlab-proxy bootstrap --url https://gitlab.example.com --token glpat-... --name Main --default
+`,
+	"set-default": `Usage:
+  gitlab-proxy set-default --host-name <name>
+
+Set the default configured host used by commands when --host-name is omitted.
+
+Example:
+  gitlab-proxy set-default --host-name Main
 `,
 	"config": `Usage:
   gitlab-proxy config
 
-Print configured GitLab hosts as JSON. Tokens are never printed.
+Print configured GitLab hosts and default_host as JSON. Tokens are never printed.
 
 Example:
   gitlab-proxy config
@@ -410,28 +597,57 @@ Example:
   gitlab-proxy export --output-path config.json
 `,
 	"comments": `Usage:
-  gitlab-proxy comments --host-name <name> --repo <project-path> (--branch <branch> | --mr-iid <iid>) [--include-resolved]
+  gitlab-proxy comments [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) [--include-resolved]
 
 Print merge request comments as JSON. By default only unresolved resolvable comments are returned.
+If --host-name is omitted, default_host from the config is used.
 
 Example:
-  gitlab-proxy comments --host-name Main --repo group/project --branch feature/review
+  gitlab-proxy comments --repo group/project --branch feature/review
 `,
 	"mr-context": `Usage:
-  gitlab-proxy mr-context --host-name <name> --repo <project-path> (--branch <branch> | --mr-iid <iid>) [--include-resolved]
+  gitlab-proxy mr-context [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) [--include-resolved]
 
 Print merge request metadata, diffs and comments as one JSON object.
+If --host-name is omitted, default_host from the config is used.
 
 Example:
-  gitlab-proxy mr-context --host-name Main --repo group/project --branch feature/review
+  gitlab-proxy mr-context --repo group/project --branch feature/review
 `,
 	"create-mr": `Usage:
-  gitlab-proxy create-mr --host-name <name> --repo <project-path> --source-branch <branch> --target-branch <branch> --title <title> [--description <text>] [--remove-source-branch] [--allow-collaboration]
+  gitlab-proxy create-mr [--host-name <name>] --repo <project-path> --source-branch <branch> --target-branch <branch> --title <title> [--description <text>] [--remove-source-branch] [--allow-collaboration]
 
 Create an opened merge request or return an existing opened MR with the same source and target branches.
+If --host-name is omitted, default_host from the config is used.
 
 Example:
-  gitlab-proxy create-mr --host-name Main --repo group/project --source-branch feature-comments-fix --target-branch feature --title "Fix review comments for feature"
+  gitlab-proxy create-mr --repo group/project --source-branch feature-comments-fix --target-branch feature --title "Fix review comments for feature"
+`,
+	"add-mr-comment": `Usage:
+  gitlab-proxy add-mr-comment [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --body <text>
+
+Add a general comment to a merge request. If --host-name is omitted, default_host from the config is used.
+
+Example:
+  gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body "Review comment text"
+`,
+	"add-mr-thread": `Usage:
+  gitlab-proxy add-mr-thread [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --file <path> (--new-line <n> | --old-line <n>) --body <text> [--old-file <path>]
+
+Open a review thread on a specific changed code line. Use --new-line for added or unchanged new-side lines, --old-line for removed old-side lines, and both for unchanged lines when needed.
+If --host-name is omitted, default_host from the config is used.
+
+Example:
+  gitlab-proxy add-mr-thread --repo group/project --mr-iid 123 --file internal/app.go --new-line 42 --body "Review comment text"
+`,
+	"install-skill": `Usage:
+  gitlab-proxy install-skill [--target-dir <dir>] [--skill <name>]
+
+Install all embedded Codex skills. Use --skill to install only one skill.
+
+Examples:
+  gitlab-proxy install-skill
+  gitlab-proxy install-skill --skill gitlab
 `,
 }
 

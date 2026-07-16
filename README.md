@@ -80,13 +80,15 @@ Non-interactive setup:
 gitlab-proxy bootstrap \
   --url https://gitlab.example.com \
   --token glpat-... \
-  --name Main
+  --name Main \
+  --default
 ```
 
 Rules:
 
 - `--name` must contain only English letters, no spaces, max length 100.
 - The token is verified with `GET /api/v4/user`.
+- The first configured host becomes `default_host` automatically. Use `--default` or `set-default` to change it later.
 - The config is stored in `~/.config/gitlab-proxy/config.json`.
 - Override the config path with `GITLAB_PROXY_CONFIG=/path/to/config.json`.
 
@@ -98,13 +100,18 @@ gitlab-proxy config
 
 Tokens are not printed by `config` or normal `export`.
 
+Set the default host explicitly:
+
+```bash
+gitlab-proxy set-default --host-name Main
+```
+
 ## Common Commands
 
 Fetch review context by source branch:
 
 ```bash
 gitlab-proxy mr-context \
-  --host-name Main \
   --repo group/project \
   --branch feature/my-branch
 ```
@@ -113,7 +120,6 @@ Fetch review context by MR IID:
 
 ```bash
 gitlab-proxy mr-context \
-  --host-name Main \
   --repo group/project \
   --mr-iid 123
 ```
@@ -122,7 +128,6 @@ Fetch only comments:
 
 ```bash
 gitlab-proxy comments \
-  --host-name Main \
   --repo group/project \
   --branch feature/my-branch
 ```
@@ -131,7 +136,6 @@ Create or reuse a follow-up merge request:
 
 ```bash
 gitlab-proxy create-mr \
-  --host-name Main \
   --repo group/project \
   --source-branch feature/my-branch-comments-fix \
   --target-branch feature/my-branch \
@@ -140,20 +144,40 @@ gitlab-proxy create-mr \
 
 `create-mr` is idempotent for the same source and target branches. If an opened MR already exists, it returns that MR with `created: false`.
 
-## Install the Codex Skill
-
-Install the skill folder into Codex's user skills directory:
+Add a general comment to a merge request:
 
 ```bash
-mkdir -p ~/.codex/skills
-cp -r /path/to/gitlabProxy ~/.codex/skills/gitlab-review-comments
+gitlab-proxy add-mr-comment \
+  --repo group/project \
+  --mr-iid 123 \
+  --body "Review comment text"
 ```
 
-Validate the skill if the `skill-creator` validator is available:
+Open a review thread on a changed code line:
 
 ```bash
-python3 /home/$USER/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
-  ~/.codex/skills/gitlab-review-comments
+gitlab-proxy add-mr-thread \
+  --repo group/project \
+  --mr-iid 123 \
+  --file internal/app.go \
+  --new-line 42 \
+  --body "Review comment text"
+```
+
+## Install the Codex Skill
+
+Install all embedded skills from the binary:
+
+```bash
+gitlab-proxy install-skill
+```
+
+The command writes embedded skills under `~/.codex/skills`, including `gitlab-review-comments/SKILL.md`, `gitlab/SKILL.md`, and `gitlab-review-branch/SKILL.md`.
+
+Install only one skill when needed:
+
+```bash
+gitlab-proxy install-skill --skill gitlab
 ```
 
 Restart the Codex session so the skill is discovered.
@@ -162,6 +186,12 @@ Use it from a local project repository:
 
 ```text
 Use the gitlab-review-comments skill to fix unresolved comments in the current GitLab MR.
+```
+
+Review a branch or MR without publishing comments immediately:
+
+```text
+Use the gitlab-review-branch skill to review this MR: https://gitlab.example.com/group/project/-/merge_requests/123
 ```
 
 Before running the skill, verify:
