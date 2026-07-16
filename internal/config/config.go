@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"gitlab-proxy/internal/apperr"
+	"github.com/Depik400/agent-gitlab-proxy/internal/apperr"
 )
 
 const (

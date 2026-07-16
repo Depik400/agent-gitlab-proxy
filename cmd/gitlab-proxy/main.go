@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	assets "gitlab-proxy"
-	"gitlab-proxy/internal/cli"
+	assets "github.com/Depik400/agent-gitlab-proxy"
+	"github.com/Depik400/agent-gitlab-proxy/internal/cli"
 )
 
 func main() {

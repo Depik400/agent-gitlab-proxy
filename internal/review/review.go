@@ -4,8 +4,8 @@ import (
 	"context"
 	"strconv"
 
-	"gitlab-proxy/internal/apperr"
-	"gitlab-proxy/internal/gitlab"
+	"github.com/Depik400/agent-gitlab-proxy/internal/apperr"
+	"github.com/Depik400/agent-gitlab-proxy/internal/gitlab"
 )
 
 type GitLabClient interface {

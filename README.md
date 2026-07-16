@@ -27,7 +27,13 @@ For read-only commands such as `comments` and `mr-context`, `read_api` may be en
 
 ## Install `gitlab-proxy`
 
-From this repository:
+From GitHub:
+
+```bash
+go install github.com/Depik400/agent-gitlab-proxy/cmd/gitlab-proxy@latest
+```
+
+From this repository checkout:
 
 ```bash
 go install -buildvcs=false ./cmd/gitlab-proxy

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab-proxy/internal/apperr"
-	"gitlab-proxy/internal/config"
+	"github.com/Depik400/agent-gitlab-proxy/internal/apperr"
+	"github.com/Depik400/agent-gitlab-proxy/internal/config"
 )
 
 func TestRunConfigMasksToken(t *testing.T) {
