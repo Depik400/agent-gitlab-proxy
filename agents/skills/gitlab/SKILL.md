@@ -5,7 +5,7 @@ description: "Use this skill when Codex needs to inspect GitLab merge requests, 
 
 # GitLab
 
-Use `gitlab-proxy` for GitLab API reads and merge request creation. Use `git` for local repository state, branches, commits, remotes, and pushes.
+Use `gitlab-proxy` for GitLab API reads, merge request creation, and comments. Use `git` for local repository state, branches, commits, remotes, and pushes.
 
 ## Setup
 
@@ -39,6 +39,22 @@ gitlab-proxy comments --repo group/project --branch feature/name
 ```bash
 gitlab-proxy create-mr --repo group/project --source-branch feature/name --target-branch main --title "Merge feature/name"
 ```
+
+- Add a general comment to an MR:
+
+```bash
+gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body "## Review\n\nComment text"
+```
+
+Use `--body-file comment.md` for a multi-line Markdown comment. GitLab renders comments as GitLab Flavored Markdown. Use `--branch feature/name` instead of `--mr-iid` when the branch identifies exactly one open MR. General comments are posted as MR notes; use `add-mr-thread` only for comments tied to a changed code line.
+
+- Add a Markdown code-position thread:
+
+```bash
+gitlab-proxy add-mr-thread --repo group/project --mr-iid 123 --file internal/app.go --new-line 42 --body "**Required:** add a test."
+```
+
+`add-mr-thread` accepts inline GitLab Flavored Markdown only; it does not accept `--body-file`.
 
 Add `--host-name <name>` to these commands only when no default host is configured or when the user requests a specific host.
 

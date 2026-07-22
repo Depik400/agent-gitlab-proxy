@@ -8,7 +8,7 @@ description: "Use this skill when Codex must review a GitLab merge request or br
 Use this skill to review a GitLab MR or branch in two phases:
 
 1. Draft review comments with code positions and show them to the user as a numbered list.
-2. After the user replies with comment numbers, publish only those selected comments as MR review threads.
+2. After the user replies with comment numbers, publish only those selected comments to the MR: use review threads for comments with a safe code position and general MR comments for the rest.
 
 Do not publish comments during phase 1.
 
@@ -60,24 +60,31 @@ When the user replies with numbers:
 
 1. Map the numbers to the exact proposed comments from phase 1.
 2. If any number is unclear or out of range, ask for clarification.
-3. Publish each selected item as a separate code-position review thread:
+3. Publish each selected item with a safe code position as a separate code-position review thread:
 
 ```bash
-gitlab-proxy add-mr-thread --repo <repo> --mr-iid <iid> --file <path> --new-line <line> --body "<comment text>"
+gitlab-proxy add-mr-thread --repo <repo> --mr-iid <iid> --file <path> --new-line <line> --body "**Severity:** <level>\n\n<comment text>"
 ```
 
-For removed lines, use `--old-line <line>`. For renamed files, include `--old-file <old-path>` when it differs from `--file`.
+Format `--body` as inline GitLab Flavored Markdown. For removed lines, use `--old-line <line>`. For renamed files, include `--old-file <old-path>` when it differs from `--file`. `add-mr-thread` does not support `--body-file`.
 
 Add `--host-name <host>` only when no default host is configured.
 
-4. If a selected comment cannot be safely tied to a changed line, ask the user whether to post it as a general MR comment with `gitlab-proxy add-mr-comment`.
+4. Publish every selected comment that cannot be safely tied to a changed line as a general MR comment:
+
+```bash
+gitlab-proxy add-mr-comment --repo <repo> --mr-iid <iid> --body "## Review\n\n<comment text>"
+```
+
+Format the body as GitLab Flavored Markdown. For multi-line content, write a `.md` file and use `--body-file <path>`. Do not drop a selected comment merely because it has no code position. Add `--host-name <host>` only when no default host is configured.
+
 5. Report which selected comment numbers were posted and include the MR URL when available.
 
 ## Rules
 
 - Never publish unselected comments.
 - Never publish comments before showing the numbered list and receiving the user's selected numbers.
-- Prefer code-position threads over general MR comments.
+- Prefer code-position threads over general MR comments when a safe changed-line position is available.
 - Preserve unrelated local changes.
 - Treat `gitlab-proxy` stdout as JSON and stderr as structured JSON errors.
 - Do not expose tokens from `gitlab-proxy export --include-secrets`.

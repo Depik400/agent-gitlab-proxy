@@ -102,6 +102,43 @@ func TestRunCommandHelpFlag(t *testing.T) {
 	}
 }
 
+func TestRunAddMRCommentRequiresOneBodySource(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"add-mr-comment", "--repo", "group/project", "--mr-iid", "1"}, strings.NewReader(""), &stdout, &stderr, nil)
+	if code != apperr.ExitInvalidArgs {
+		t.Fatalf("code = %d", code)
+	}
+	var got apperr.Error
+	if err := json.Unmarshal(stderr.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Message != "exactly one of --body or --body-file is required" {
+		t.Fatalf("message = %q", got.Message)
+	}
+}
+
+func TestRunAddMRCommentHelpDescribesMarkdownFile(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"help", "add-mr-comment"}, strings.NewReader(""), &stdout, &stderr, nil)
+	if code != apperr.ExitOK {
+		t.Fatalf("code = %d stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "--body-file") || !strings.Contains(stdout.String(), "Markdown") {
+		t.Fatalf("help = %s", stdout.String())
+	}
+}
+
+func TestRunAddMRThreadHelpDescribesInlineMarkdown(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"help", "add-mr-thread"}, strings.NewReader(""), &stdout, &stderr, nil)
+	if code != apperr.ExitOK {
+		t.Fatalf("code = %d stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "GitLab Flavored Markdown") || strings.Contains(stdout.String(), "--body-file") {
+		t.Fatalf("help = %s", stdout.String())
+	}
+}
+
 func TestRunUnknownHelpTopicReturnsJSONError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"help", "missing"}, strings.NewReader(""), &stdout, &stderr, nil)

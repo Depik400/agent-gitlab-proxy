@@ -43,6 +43,13 @@ Use `gitlab-proxy` for GitLab API operations and `git` for local branch, commit,
    - Run `gitlab-proxy create-mr --repo <repo> --source-branch "${BranchName}-comments-fix" --target-branch "<BranchName>" --title "Fix review comments for <BranchName>" --description "<summary>"`.
    - Add `--host-name <host>` only when no default host is configured.
    - Report the returned `merge_request.web_url`.
+11. When the user asks to leave a summary or reply on the original MR, post it with:
+
+```bash
+gitlab-proxy add-mr-comment --repo <repo> --mr-iid <iid> --body-file <comment.md>
+```
+
+   Format the file as GitLab Flavored Markdown and use the original MR IID resolved in step 6. Do not post a comment unless the user requested one.
 
 ## Rules
 
@@ -61,4 +68,5 @@ gitlab-proxy config
 gitlab-proxy mr-context --repo group/project --branch feature
 gitlab-proxy mr-context --host-name Main --repo group/project --branch feature
 gitlab-proxy create-mr --repo group/project --source-branch feature-comments-fix --target-branch feature --title "Fix review comments for feature"
+gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body-file review-summary.md
 ```

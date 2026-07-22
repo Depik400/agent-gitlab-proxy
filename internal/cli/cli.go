@@ -300,7 +300,8 @@ func runAddMRComment(args []string, stdout io.Writer) error {
 	repo := fs.String("repo", "", "GitLab project path")
 	branch := fs.String("branch", "", "source branch")
 	mrIID := fs.String("mr-iid", "", "merge request IID")
-	body := fs.String("body", "", "comment body")
+	body := fs.String("body", "", "comment body (GitLab Flavored Markdown)")
+	bodyFile := fs.String("body-file", "", "path to a Markdown file containing the comment body")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -309,6 +310,16 @@ func runAddMRComment(args []string, stdout io.Writer) error {
 	}
 	if (*branch == "" && *mrIID == "") || (*branch != "" && *mrIID != "") {
 		return apperr.New(apperr.CodeInvalidArgs, "exactly one of --branch or --mr-iid is required", nil)
+	}
+	if (*body == "" && *bodyFile == "") || (*body != "" && *bodyFile != "") {
+		return apperr.New(apperr.CodeInvalidArgs, "exactly one of --body or --body-file is required", nil)
+	}
+	if *bodyFile != "" {
+		data, err := os.ReadFile(*bodyFile)
+		if err != nil {
+			return apperr.Wrap(apperr.CodeInvalidArgs, "read --body-file", err, map[string]string{"path": *bodyFile})
+		}
+		*body = string(data)
 	}
 	iid := 0
 	if *mrIID != "" {
@@ -337,7 +348,7 @@ func runAddMRThread(args []string, stdout io.Writer) error {
 	repo := fs.String("repo", "", "GitLab project path")
 	branch := fs.String("branch", "", "source branch")
 	mrIID := fs.String("mr-iid", "", "merge request IID")
-	body := fs.String("body", "", "comment body")
+	body := fs.String("body", "", "comment body (GitLab Flavored Markdown)")
 	file := fs.String("file", "", "new file path in the diff")
 	oldFile := fs.String("old-file", "", "old file path in the diff for renamed files")
 	newLine := fs.Int("new-line", 0, "new line number in the diff")
@@ -624,21 +635,22 @@ Example:
   gitlab-proxy create-mr --repo group/project --source-branch feature-comments-fix --target-branch feature --title "Fix review comments for feature"
 `,
 	"add-mr-comment": `Usage:
-  gitlab-proxy add-mr-comment [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --body <text>
+	  gitlab-proxy add-mr-comment [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) (--body <markdown> | --body-file <path>)
 
-Add a general comment to a merge request. If --host-name is omitted, default_host from the config is used.
+Add a general GitLab Flavored Markdown comment to a merge request. Pass inline Markdown with --body or read it from a Markdown file with --body-file. If --host-name is omitted, default_host from the config is used.
 
 Example:
-  gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body "Review comment text"
+  gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body "## Review\n\nPlease add a test."
+  gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body-file review-comment.md
 `,
 	"add-mr-thread": `Usage:
-  gitlab-proxy add-mr-thread [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --file <path> (--new-line <n> | --old-line <n>) --body <text> [--old-file <path>]
+	  gitlab-proxy add-mr-thread [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --file <path> (--new-line <n> | --old-line <n>) --body <markdown> [--old-file <path>]
 
-Open a review thread on a specific changed code line. Use --new-line for added or unchanged new-side lines, --old-line for removed old-side lines, and both for unchanged lines when needed.
+Open a GitLab Flavored Markdown review thread on a specific changed code line. Use --new-line for added or unchanged new-side lines, --old-line for removed old-side lines, and both for unchanged lines when needed. Only inline Markdown through --body is supported.
 If --host-name is omitted, default_host from the config is used.
 
 Example:
-  gitlab-proxy add-mr-thread --repo group/project --mr-iid 123 --file internal/app.go --new-line 42 --body "Review comment text"
+  gitlab-proxy add-mr-thread --repo group/project --mr-iid 123 --file internal/app.go --new-line 42 --body "**Required:** add a test."
 `,
 	"install-skill": `Usage:
   gitlab-proxy install-skill [--target-dir <dir>] [--skill <name>]

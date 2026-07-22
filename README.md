@@ -156,7 +156,16 @@ Add a general comment to a merge request:
 gitlab-proxy add-mr-comment \
   --repo group/project \
   --mr-iid 123 \
-  --body "Review comment text"
+  --body "## Review\n\nPlease add a test."
+```
+
+MR comments support GitLab Flavored Markdown. For a multi-line comment, pass a Markdown file instead:
+
+```bash
+gitlab-proxy add-mr-comment \
+  --repo group/project \
+  --mr-iid 123 \
+  --body-file review-comment.md
 ```
 
 Open a review thread on a changed code line:
@@ -167,8 +176,10 @@ gitlab-proxy add-mr-thread \
   --mr-iid 123 \
   --file internal/app.go \
   --new-line 42 \
-  --body "Review comment text"
+  --body "**Required:** add a test."
 ```
+
+Thread bodies support inline GitLab Flavored Markdown through `--body`. File input is supported only for general MR comments (`add-mr-comment`).
 
 ## Install the Codex Skill
 
