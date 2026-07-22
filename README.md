@@ -171,6 +171,19 @@ gitlab-proxy reply-mr-discussion \
 
 Use `comments` or `mr-context` to get `discussion_id`. All text sent to GitLab is GitLab Flavored Markdown.
 
+Edit or delete a general MR comment. Add `--discussion-id` when the note belongs to a discussion thread:
+
+```bash
+gitlab-proxy edit-mr-comment --repo group/project --mr-iid 123 --discussion-id discussion-id --note-id 456 --body "**Resolved:** fixed in 1a2b3c4."
+gitlab-proxy delete-mr-comment --repo group/project --mr-iid 123 --discussion-id discussion-id --note-id 456
+```
+
+Update an MR title, description, or both:
+
+```bash
+gitlab-proxy edit-mr --repo group/project --mr-iid 123 --title "Improve review workflow" --description "## Summary\n\nAdds discussion replies."
+```
+
 MR comments support GitLab Flavored Markdown. For a multi-line comment, pass a Markdown file instead:
 
 ```bash

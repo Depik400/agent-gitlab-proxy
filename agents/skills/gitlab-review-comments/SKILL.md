@@ -55,6 +55,17 @@ gitlab-proxy add-mr-comment --repo <repo> --mr-iid <iid> --body-file <comment.md
 ```bash
 gitlab-proxy reply-mr-discussion --repo <repo> --mr-iid <iid> --discussion-id <discussion-id> --body "**Resolved:** <reply text>"
 ```
+13. When the user asks to edit or delete a prior response, use its `note_id` and `discussion_id`. Omit `--discussion-id` only for a general MR comment:
+
+```bash
+gitlab-proxy edit-mr-comment --repo <repo> --mr-iid <iid> --discussion-id <discussion-id> --note-id <note-id> --body "**Resolved:** <updated reply>"
+gitlab-proxy delete-mr-comment --repo <repo> --mr-iid <iid> --discussion-id <discussion-id> --note-id <note-id>
+```
+14. When the user asks to update the original or follow-up MR title or description, use:
+
+```bash
+gitlab-proxy edit-mr --repo <repo> --mr-iid <iid> --title "<title>" --description "## Summary\n\n<description>"
+```
 
 ## Rules
 
@@ -76,4 +87,7 @@ gitlab-proxy mr-context --host-name Main --repo group/project --branch feature
 gitlab-proxy create-mr --repo group/project --source-branch feature-comments-fix --target-branch feature --title "Fix review comments for feature"
 gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body-file review-summary.md
 gitlab-proxy reply-mr-discussion --repo group/project --mr-iid 123 --discussion-id abc123 --body "**Resolved:** addressed in 1a2b3c4."
+gitlab-proxy edit-mr-comment --repo group/project --mr-iid 123 --discussion-id abc123 --note-id 456 --body "**Resolved:** updated reply."
+gitlab-proxy delete-mr-comment --repo group/project --mr-iid 123 --discussion-id abc123 --note-id 456
+gitlab-proxy edit-mr --repo group/project --mr-iid 123 --title "Fix review comments" --description "## Summary\n\nAddressed feedback."
 ```

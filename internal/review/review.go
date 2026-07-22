@@ -16,8 +16,11 @@ type GitLabClient interface {
 	ListMergeRequestVersions(ctx context.Context, repo string, iid int) ([]gitlab.MergeRequestVersion, error)
 	ListDiffs(ctx context.Context, repo string, iid int) ([]gitlab.Diff, error)
 	CreateMergeRequest(ctx context.Context, repo string, input gitlab.CreateMergeRequestInput) (gitlab.MergeRequest, error)
+	UpdateMergeRequest(ctx context.Context, repo string, iid int, input gitlab.UpdateMergeRequestInput) (gitlab.MergeRequest, error)
 	AddMergeRequestNote(ctx context.Context, repo string, iid int, body string) (gitlab.Note, error)
 	ReplyToMergeRequestDiscussion(ctx context.Context, repo string, iid int, discussionID string, body string) (gitlab.Note, error)
+	UpdateMergeRequestNote(ctx context.Context, repo string, iid, noteID int, discussionID, body string) (gitlab.Note, error)
+	DeleteMergeRequestNote(ctx context.Context, repo string, iid, noteID int, discussionID string) error
 	CreateMergeRequestDiscussion(ctx context.Context, repo string, iid int, input gitlab.CreateMergeRequestDiscussionInput) (gitlab.Discussion, error)
 }
 
@@ -89,6 +92,31 @@ type ReplyToMergeRequestDiscussionResult struct {
 	MergeRequest gitlab.MergeRequest `json:"merge_request"`
 	DiscussionID string              `json:"discussion_id"`
 	Note         gitlab.Note         `json:"note"`
+}
+
+type UpdateMergeRequestInput struct {
+	Title       *string
+	Description *string
+}
+
+type UpdateMergeRequestResult struct {
+	Repo         string              `json:"repo"`
+	MergeRequest gitlab.MergeRequest `json:"merge_request"`
+}
+
+type UpdateMergeRequestCommentResult struct {
+	Repo         string              `json:"repo"`
+	MergeRequest gitlab.MergeRequest `json:"merge_request"`
+	DiscussionID string              `json:"discussion_id,omitempty"`
+	Note         gitlab.Note         `json:"note"`
+}
+
+type DeleteMergeRequestCommentResult struct {
+	Repo         string              `json:"repo"`
+	MergeRequest gitlab.MergeRequest `json:"merge_request"`
+	DiscussionID string              `json:"discussion_id,omitempty"`
+	NoteID       int                 `json:"note_id"`
+	Deleted      bool                `json:"deleted"`
 }
 
 type AddMergeRequestThreadInput struct {
@@ -214,6 +242,21 @@ func CreateMergeRequest(ctx context.Context, client GitLabClient, repo string, i
 	}
 }
 
+func UpdateMergeRequest(ctx context.Context, client GitLabClient, repo string, selector MRSelector, input UpdateMergeRequestInput) (UpdateMergeRequestResult, error) {
+	if input.Title == nil && input.Description == nil {
+		return UpdateMergeRequestResult{}, apperr.New(apperr.CodeInvalidArgs, "at least one of --title or --description is required", nil)
+	}
+	mr, err := ResolveMR(ctx, client, repo, selector)
+	if err != nil {
+		return UpdateMergeRequestResult{}, err
+	}
+	updated, err := client.UpdateMergeRequest(ctx, repo, mr.IID, gitlab.UpdateMergeRequestInput{Title: input.Title, Description: input.Description})
+	if err != nil {
+		return UpdateMergeRequestResult{}, err
+	}
+	return UpdateMergeRequestResult{Repo: repo, MergeRequest: updated}, nil
+}
+
 func AddMergeRequestComment(ctx context.Context, client GitLabClient, repo string, selector MRSelector, body string) (AddMergeRequestCommentResult, error) {
 	if body == "" {
 		return AddMergeRequestCommentResult{}, apperr.New(apperr.CodeInvalidArgs, "--body is required", nil)
@@ -245,6 +288,38 @@ func ReplyToMergeRequestDiscussion(ctx context.Context, client GitLabClient, rep
 		return ReplyToMergeRequestDiscussionResult{}, err
 	}
 	return ReplyToMergeRequestDiscussionResult{Repo: repo, MergeRequest: mr, DiscussionID: discussionID, Note: note}, nil
+}
+
+func UpdateMergeRequestComment(ctx context.Context, client GitLabClient, repo string, selector MRSelector, discussionID string, noteID int, body string) (UpdateMergeRequestCommentResult, error) {
+	if noteID <= 0 {
+		return UpdateMergeRequestCommentResult{}, apperr.New(apperr.CodeInvalidArgs, "--note-id must be a positive integer", nil)
+	}
+	if body == "" {
+		return UpdateMergeRequestCommentResult{}, apperr.New(apperr.CodeInvalidArgs, "--body is required", nil)
+	}
+	mr, err := ResolveMR(ctx, client, repo, selector)
+	if err != nil {
+		return UpdateMergeRequestCommentResult{}, err
+	}
+	note, err := client.UpdateMergeRequestNote(ctx, repo, mr.IID, noteID, discussionID, body)
+	if err != nil {
+		return UpdateMergeRequestCommentResult{}, err
+	}
+	return UpdateMergeRequestCommentResult{Repo: repo, MergeRequest: mr, DiscussionID: discussionID, Note: note}, nil
+}
+
+func DeleteMergeRequestComment(ctx context.Context, client GitLabClient, repo string, selector MRSelector, discussionID string, noteID int) (DeleteMergeRequestCommentResult, error) {
+	if noteID <= 0 {
+		return DeleteMergeRequestCommentResult{}, apperr.New(apperr.CodeInvalidArgs, "--note-id must be a positive integer", nil)
+	}
+	mr, err := ResolveMR(ctx, client, repo, selector)
+	if err != nil {
+		return DeleteMergeRequestCommentResult{}, err
+	}
+	if err := client.DeleteMergeRequestNote(ctx, repo, mr.IID, noteID, discussionID); err != nil {
+		return DeleteMergeRequestCommentResult{}, err
+	}
+	return DeleteMergeRequestCommentResult{Repo: repo, MergeRequest: mr, DiscussionID: discussionID, NoteID: noteID, Deleted: true}, nil
 }
 
 func AddMergeRequestThread(ctx context.Context, client GitLabClient, repo string, selector MRSelector, input AddMergeRequestThreadInput) (AddMergeRequestThreadResult, error) {
@@ -343,9 +418,17 @@ func FlattenComments(repo string, mr gitlab.MergeRequest, discussions []gitlab.D
 }
 
 func ParseMRIID(raw string) (int, error) {
-	iid, err := strconv.Atoi(raw)
-	if err != nil || iid <= 0 {
-		return 0, apperr.New(apperr.CodeInvalidArgs, "--mr-iid must be a positive integer", map[string]string{"mr_iid": raw})
+	return parsePositiveInteger("--mr-iid", raw)
+}
+
+func ParseNoteID(raw string) (int, error) {
+	return parsePositiveInteger("--note-id", raw)
+}
+
+func parsePositiveInteger(flagName, raw string) (int, error) {
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, apperr.New(apperr.CodeInvalidArgs, flagName+" must be a positive integer", map[string]string{flagName[2:]: raw})
 	}
-	return iid, nil
+	return value, nil
 }

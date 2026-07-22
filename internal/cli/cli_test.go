@@ -150,6 +150,19 @@ func TestRunReplyMRDiscussionHelpDescribesMarkdown(t *testing.T) {
 	}
 }
 
+func TestRunEditCommandsHelp(t *testing.T) {
+	for _, command := range []string{"edit-mr", "edit-mr-comment", "delete-mr-comment"} {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"help", command}, strings.NewReader(""), &stdout, &stderr, nil)
+		if code != apperr.ExitOK {
+			t.Fatalf("%s: code = %d stderr = %s", command, code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "--mr-iid") {
+			t.Fatalf("%s help = %s", command, stdout.String())
+		}
+	}
+}
+
 func TestRunUnknownHelpTopicReturnsJSONError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"help", "missing"}, strings.NewReader(""), &stdout, &stderr, nil)

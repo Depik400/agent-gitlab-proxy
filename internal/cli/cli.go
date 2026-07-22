@@ -69,8 +69,14 @@ func run(args []string, stdin io.Reader, stdout io.Writer, embeddedSkills map[st
 		return runMRContext(args[1:], stdout)
 	case "create-mr":
 		return runCreateMR(args[1:], stdout)
+	case "edit-mr":
+		return runEditMR(args[1:], stdout)
 	case "add-mr-comment":
 		return runAddMRComment(args[1:], stdout)
+	case "edit-mr-comment":
+		return runEditMRComment(args[1:], stdout)
+	case "delete-mr-comment":
+		return runDeleteMRComment(args[1:], stdout)
 	case "reply-mr-discussion":
 		return runReplyMRDiscussion(args[1:], stdout)
 	case "add-mr-thread":
@@ -296,6 +302,56 @@ func runCreateMR(args []string, stdout io.Writer) error {
 	return output.JSON(stdout, result)
 }
 
+func runEditMR(args []string, stdout io.Writer) error {
+	fs := newFlagSet("edit-mr")
+	hostName := fs.String("host-name", "", "configured host name")
+	repo := fs.String("repo", "", "GitLab project path")
+	branch := fs.String("branch", "", "source branch")
+	mrIID := fs.String("mr-iid", "", "merge request IID")
+	title := fs.String("title", "", "new merge request title")
+	description := fs.String("description", "", "new merge request description (GitLab Flavored Markdown)")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if *repo == "" {
+		return apperr.New(apperr.CodeInvalidArgs, "--repo is required", nil)
+	}
+	if (*branch == "" && *mrIID == "") || (*branch != "" && *mrIID != "") {
+		return apperr.New(apperr.CodeInvalidArgs, "exactly one of --branch or --mr-iid is required", nil)
+	}
+	provided := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { provided[f.Name] = true })
+	if !provided["title"] && !provided["description"] {
+		return apperr.New(apperr.CodeInvalidArgs, "at least one of --title or --description is required", nil)
+	}
+	iid := 0
+	if *mrIID != "" {
+		parsed, err := review.ParseMRIID(*mrIID)
+		if err != nil {
+			return err
+		}
+		iid = parsed
+	}
+	var titleValue, descriptionValue *string
+	if provided["title"] {
+		titleValue = title
+	}
+	if provided["description"] {
+		descriptionValue = description
+	}
+	client, err := clientForHost(*hostName)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := review.UpdateMergeRequest(ctx, client, *repo, review.MRSelector{Branch: *branch, MRIID: iid}, review.UpdateMergeRequestInput{Title: titleValue, Description: descriptionValue})
+	if err != nil {
+		return err
+	}
+	return output.JSON(stdout, result)
+}
+
 func runAddMRComment(args []string, stdout io.Writer) error {
 	fs := newFlagSet("add-mr-comment")
 	hostName := fs.String("host-name", "", "configured host name")
@@ -342,6 +398,84 @@ func runAddMRComment(args []string, stdout io.Writer) error {
 		return err
 	}
 	return output.JSON(stdout, result)
+}
+
+func runEditMRComment(args []string, stdout io.Writer) error {
+	fs := newFlagSet("edit-mr-comment")
+	hostName := fs.String("host-name", "", "configured host name")
+	repo := fs.String("repo", "", "GitLab project path")
+	branch := fs.String("branch", "", "source branch")
+	mrIID := fs.String("mr-iid", "", "merge request IID")
+	discussionID := fs.String("discussion-id", "", "GitLab discussion ID for a thread message")
+	noteID := fs.String("note-id", "", "GitLab note ID")
+	body := fs.String("body", "", "new comment body (GitLab Flavored Markdown)")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	selector, note, err := parseMRCommentTarget(*repo, *branch, *mrIID, *noteID)
+	if err != nil {
+		return err
+	}
+	client, err := clientForHost(*hostName)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := review.UpdateMergeRequestComment(ctx, client, *repo, selector, *discussionID, note, *body)
+	if err != nil {
+		return err
+	}
+	return output.JSON(stdout, result)
+}
+
+func runDeleteMRComment(args []string, stdout io.Writer) error {
+	fs := newFlagSet("delete-mr-comment")
+	hostName := fs.String("host-name", "", "configured host name")
+	repo := fs.String("repo", "", "GitLab project path")
+	branch := fs.String("branch", "", "source branch")
+	mrIID := fs.String("mr-iid", "", "merge request IID")
+	discussionID := fs.String("discussion-id", "", "GitLab discussion ID for a thread message")
+	noteID := fs.String("note-id", "", "GitLab note ID")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	selector, note, err := parseMRCommentTarget(*repo, *branch, *mrIID, *noteID)
+	if err != nil {
+		return err
+	}
+	client, err := clientForHost(*hostName)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := review.DeleteMergeRequestComment(ctx, client, *repo, selector, *discussionID, note)
+	if err != nil {
+		return err
+	}
+	return output.JSON(stdout, result)
+}
+
+func parseMRCommentTarget(repo, branch, rawMRIID, rawNoteID string) (review.MRSelector, int, error) {
+	if repo == "" {
+		return review.MRSelector{}, 0, apperr.New(apperr.CodeInvalidArgs, "--repo is required", nil)
+	}
+	if (branch == "" && rawMRIID == "") || (branch != "" && rawMRIID != "") {
+		return review.MRSelector{}, 0, apperr.New(apperr.CodeInvalidArgs, "exactly one of --branch or --mr-iid is required", nil)
+	}
+	noteID, err := review.ParseNoteID(rawNoteID)
+	if err != nil {
+		return review.MRSelector{}, 0, err
+	}
+	iid := 0
+	if rawMRIID != "" {
+		iid, err = review.ParseMRIID(rawMRIID)
+		if err != nil {
+			return review.MRSelector{}, 0, err
+		}
+	}
+	return review.MRSelector{Branch: branch, MRIID: iid}, noteID, nil
 }
 
 func runReplyMRDiscussion(args []string, stdout io.Writer) error {
@@ -594,7 +728,10 @@ Commands:
   comments    Print unresolved merge request comments as JSON.
   mr-context  Print merge request metadata, diffs and comments as JSON.
   create-mr   Create or reuse an opened merge request.
+  edit-mr     Update a merge request title or description.
   add-mr-comment Add a general comment to a merge request.
+  edit-mr-comment Update a merge request comment or discussion reply.
+  delete-mr-comment Delete a merge request comment or discussion reply.
   reply-mr-discussion Reply to an existing merge request discussion.
   add-mr-thread Add a code-position thread to a merge request.
   install-skill Install embedded Codex skills.
@@ -675,6 +812,14 @@ If --host-name is omitted, default_host from the config is used.
 Example:
   gitlab-proxy create-mr --repo group/project --source-branch feature-comments-fix --target-branch feature --title "Fix review comments for feature"
 `,
+	"edit-mr": `Usage:
+  gitlab-proxy edit-mr [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) [--title <text>] [--description <markdown>]
+
+Update a merge request title, description, or both. Description is GitLab Flavored Markdown. Pass --description "" to clear the description. If --host-name is omitted, default_host from the config is used.
+
+Example:
+  gitlab-proxy edit-mr --repo group/project --mr-iid 123 --title "Improve review workflow" --description "## Summary\n\nAdds discussion replies."
+`,
 	"add-mr-comment": `Usage:
 	  gitlab-proxy add-mr-comment [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) (--body <markdown> | --body-file <path>)
 
@@ -683,6 +828,22 @@ Add a general GitLab Flavored Markdown comment to a merge request. Pass inline M
 Example:
   gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body "## Review\n\nPlease add a test."
   gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body-file review-comment.md
+`,
+	"edit-mr-comment": `Usage:
+  gitlab-proxy edit-mr-comment [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --note-id <id> --body <markdown> [--discussion-id <id>]
+
+Update a general MR comment or a discussion reply. Pass --discussion-id when the note belongs to a discussion thread; omit it for a general MR comment. Body is GitLab Flavored Markdown. If --host-name is omitted, default_host from the config is used.
+
+Example:
+  gitlab-proxy edit-mr-comment --repo group/project --mr-iid 123 --discussion-id abc123 --note-id 456 --body "**Resolved:** fixed in 1a2b3c4."
+`,
+	"delete-mr-comment": `Usage:
+  gitlab-proxy delete-mr-comment [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --note-id <id> [--discussion-id <id>]
+
+Delete a general MR comment or a discussion reply. Pass --discussion-id when the note belongs to a discussion thread; omit it for a general MR comment. If --host-name is omitted, default_host from the config is used.
+
+Example:
+  gitlab-proxy delete-mr-comment --repo group/project --mr-iid 123 --discussion-id abc123 --note-id 456
 `,
 	"reply-mr-discussion": `Usage:
   gitlab-proxy reply-mr-discussion [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --discussion-id <id> --body <markdown>

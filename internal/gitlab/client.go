@@ -128,6 +128,11 @@ type CreateMergeRequestInput struct {
 	AllowCollaboration bool
 }
 
+type UpdateMergeRequestInput struct {
+	Title       *string
+	Description *string
+}
+
 type CreateMergeRequestDiscussionInput struct {
 	Body     string
 	BaseSHA  string
@@ -214,6 +219,22 @@ func (c *Client) GetMergeRequest(ctx context.Context, repo string, iid int) (Mer
 	return mr, nil
 }
 
+func (c *Client) UpdateMergeRequest(ctx context.Context, repo string, iid int, input UpdateMergeRequestInput) (MergeRequest, error) {
+	values := url.Values{}
+	if input.Title != nil {
+		values.Set("title", *input.Title)
+	}
+	if input.Description != nil {
+		values.Set("description", *input.Description)
+	}
+	var mr MergeRequest
+	path := fmt.Sprintf("/projects/%s/merge_requests/%d", ProjectID(repo), iid)
+	if err := c.putForm(ctx, path, values, &mr); err != nil {
+		return MergeRequest{}, err
+	}
+	return mr, nil
+}
+
 func (c *Client) ListDiscussions(ctx context.Context, repo string, iid int) ([]Discussion, error) {
 	values := url.Values{}
 	values.Set("per_page", "100")
@@ -290,6 +311,29 @@ func (c *Client) ReplyToMergeRequestDiscussion(ctx context.Context, repo string,
 	return note, nil
 }
 
+func (c *Client) UpdateMergeRequestNote(ctx context.Context, repo string, iid, noteID int, discussionID, body string) (Note, error) {
+	values := url.Values{}
+	values.Set("body", body)
+	var note Note
+	path := mergeRequestNotePath(repo, iid, discussionID, noteID)
+	if err := c.putForm(ctx, path, values, &note); err != nil {
+		return Note{}, err
+	}
+	return note, nil
+}
+
+func (c *Client) DeleteMergeRequestNote(ctx context.Context, repo string, iid, noteID int, discussionID string) error {
+	_, _, err := c.request(ctx, http.MethodDelete, mergeRequestNotePath(repo, iid, discussionID, noteID), nil, nil, "")
+	return err
+}
+
+func mergeRequestNotePath(repo string, iid int, discussionID string, noteID int) string {
+	if discussionID != "" {
+		return fmt.Sprintf("/projects/%s/merge_requests/%d/discussions/%s/notes/%d", ProjectID(repo), iid, url.PathEscape(discussionID), noteID)
+	}
+	return fmt.Sprintf("/projects/%s/merge_requests/%d/notes/%d", ProjectID(repo), iid, noteID)
+}
+
 func (c *Client) CreateMergeRequestDiscussion(ctx context.Context, repo string, iid int, input CreateMergeRequestDiscussionInput) (Discussion, error) {
 	values := url.Values{}
 	values.Set("body", input.Body)
@@ -348,8 +392,16 @@ func (c *Client) getPaged(ctx context.Context, path string, values url.Values, c
 }
 
 func (c *Client) postForm(ctx context.Context, path string, values url.Values, dst any) error {
+	return c.form(ctx, http.MethodPost, path, values, dst)
+}
+
+func (c *Client) putForm(ctx context.Context, path string, values url.Values, dst any) error {
+	return c.form(ctx, http.MethodPut, path, values, dst)
+}
+
+func (c *Client) form(ctx context.Context, method, path string, values url.Values, dst any) error {
 	body := bytes.NewBufferString(values.Encode())
-	data, _, err := c.request(ctx, http.MethodPost, path, nil, body, "application/x-www-form-urlencoded")
+	data, _, err := c.request(ctx, method, path, nil, body, "application/x-www-form-urlencoded")
 	if err != nil {
 		return err
 	}

@@ -64,6 +64,23 @@ gitlab-proxy reply-mr-discussion --repo group/project --mr-iid 123 --discussion-
 
 Get `<discussion-id>` from `comments` or `mr-context` output.
 
+- Edit or delete a comment:
+
+```bash
+gitlab-proxy edit-mr-comment --repo group/project --mr-iid 123 --discussion-id <discussion-id> --note-id <note-id> --body "**Resolved:** updated reply."
+gitlab-proxy delete-mr-comment --repo group/project --mr-iid 123 --discussion-id <discussion-id> --note-id <note-id>
+```
+
+Omit `--discussion-id` for a general MR comment. Get both IDs from `comments` or `mr-context` output.
+
+- Edit an MR title or description:
+
+```bash
+gitlab-proxy edit-mr --repo group/project --mr-iid 123 --title "Improve review workflow" --description "## Summary\n\nUpdated details."
+```
+
+Pass `--description ""` to clear the description.
+
 Add `--host-name <name>` to these commands only when no default host is configured or when the user requests a specific host.
 
 ## Rules

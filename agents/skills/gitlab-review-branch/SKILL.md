@@ -90,6 +90,15 @@ gitlab-proxy reply-mr-discussion --repo <repo> --mr-iid <iid> --discussion-id <d
 
 Do not create a general MR comment when the user asked for a reply to a specific discussion.
 
+When the user asks to revise or remove a previously posted reply, use its `note_id` and `discussion_id`:
+
+```bash
+gitlab-proxy edit-mr-comment --repo <repo> --mr-iid <iid> --discussion-id <discussion-id> --note-id <note-id> --body "**Resolved:** <updated reply>"
+gitlab-proxy delete-mr-comment --repo <repo> --mr-iid <iid> --discussion-id <discussion-id> --note-id <note-id>
+```
+
+Only omit `--discussion-id` when editing or deleting a general MR comment.
+
 ## Rules
 
 - Never publish unselected comments.

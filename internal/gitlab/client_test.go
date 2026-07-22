@@ -170,6 +170,71 @@ func TestReplyToMergeRequestDiscussion(t *testing.T) {
 	}
 }
 
+func TestUpdateMergeRequest(t *testing.T) {
+	title := "Updated"
+	description := "## Summary"
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPut || r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/3" {
+			t.Fatalf("method = %q path = %q", r.Method, r.URL.EscapedPath())
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("title") != title || r.Form.Get("description") != description {
+			t.Fatalf("form = %v", r.Form)
+		}
+		return jsonResponse(200, `{"iid":3,"title":"Updated","description":"## Summary"}`, ""), nil
+	})
+	client := NewClientWithHTTP("https://gitlab.example.com", "token", &http.Client{Transport: transport})
+	mr, err := client.UpdateMergeRequest(context.Background(), "group/project", 3, UpdateMergeRequestInput{Title: &title, Description: &description})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mr.Title != title || mr.Description != description {
+		t.Fatalf("mr = %+v", mr)
+	}
+}
+
+func TestUpdateAndDeleteMergeRequestDiscussionNote(t *testing.T) {
+	calls := 0
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/3/discussions/discussion-1/notes/99" {
+			t.Fatalf("path = %q", r.URL.EscapedPath())
+		}
+		switch r.Method {
+		case http.MethodPut:
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if r.Form.Get("body") != "**Updated**" {
+				t.Fatalf("body = %q", r.Form.Get("body"))
+			}
+			calls++
+			return jsonResponse(200, `{"id":99,"body":"**Updated**"}`, ""), nil
+		case http.MethodDelete:
+			calls++
+			return jsonResponse(204, "", ""), nil
+		default:
+			t.Fatalf("method = %q", r.Method)
+		}
+		return nil, nil
+	})
+	client := NewClientWithHTTP("https://gitlab.example.com", "token", &http.Client{Transport: transport})
+	note, err := client.UpdateMergeRequestNote(context.Background(), "group/project", 3, 99, "discussion-1", "**Updated**")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note.ID != 99 {
+		t.Fatalf("note = %+v", note)
+	}
+	if err := client.DeleteMergeRequestNote(context.Background(), "group/project", 3, 99, "discussion-1"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d", calls)
+	}
+}
+
 func TestListMergeRequestVersions(t *testing.T) {
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/3/versions" {

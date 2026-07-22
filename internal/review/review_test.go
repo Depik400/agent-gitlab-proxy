@@ -48,12 +48,24 @@ func (f fakeClient) CreateMergeRequest(context.Context, string, gitlab.CreateMer
 	return f.createdMR, nil
 }
 
+func (f fakeClient) UpdateMergeRequest(context.Context, string, int, gitlab.UpdateMergeRequestInput) (gitlab.MergeRequest, error) {
+	return f.mr, nil
+}
+
 func (f fakeClient) AddMergeRequestNote(context.Context, string, int, string) (gitlab.Note, error) {
 	return f.note, nil
 }
 
 func (f fakeClient) ReplyToMergeRequestDiscussion(context.Context, string, int, string, string) (gitlab.Note, error) {
 	return f.note, nil
+}
+
+func (f fakeClient) UpdateMergeRequestNote(context.Context, string, int, int, string, string) (gitlab.Note, error) {
+	return f.note, nil
+}
+
+func (f fakeClient) DeleteMergeRequestNote(context.Context, string, int, int, string) error {
+	return nil
 }
 
 func (f fakeClient) CreateMergeRequestDiscussion(context.Context, string, int, gitlab.CreateMergeRequestDiscussionInput) (gitlab.Discussion, error) {
@@ -187,6 +199,40 @@ func TestReplyToMergeRequestDiscussion(t *testing.T) {
 	}
 	if got.MergeRequest.IID != 12 || got.DiscussionID != "discussion-1" || got.Note.ID != 100 {
 		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestUpdateMergeRequest(t *testing.T) {
+	title := "Updated title"
+	got, err := UpdateMergeRequest(context.Background(), fakeClient{
+		mr: gitlab.MergeRequest{IID: 12, Title: title},
+	}, "group/project", MRSelector{MRIID: 12}, UpdateMergeRequestInput{Title: &title})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MergeRequest.Title != title {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestUpdateAndDeleteMergeRequestDiscussionComment(t *testing.T) {
+	client := fakeClient{
+		mr:   gitlab.MergeRequest{IID: 12},
+		note: gitlab.Note{ID: 99, Body: "**Updated**"},
+	}
+	updated, err := UpdateMergeRequestComment(context.Background(), client, "group/project", MRSelector{MRIID: 12}, "discussion-1", 99, "**Updated**")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.DiscussionID != "discussion-1" || updated.Note.ID != 99 {
+		t.Fatalf("updated = %+v", updated)
+	}
+	deleted, err := DeleteMergeRequestComment(context.Background(), client, "group/project", MRSelector{MRIID: 12}, "discussion-1", 99)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted.Deleted || deleted.NoteID != 99 || deleted.DiscussionID != "discussion-1" {
+		t.Fatalf("deleted = %+v", deleted)
 	}
 }
 
