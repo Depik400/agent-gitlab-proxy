@@ -139,6 +139,17 @@ func TestRunAddMRThreadHelpDescribesInlineMarkdown(t *testing.T) {
 	}
 }
 
+func TestRunReplyMRDiscussionHelpDescribesMarkdown(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"help", "reply-mr-discussion"}, strings.NewReader(""), &stdout, &stderr, nil)
+	if code != apperr.ExitOK {
+		t.Fatalf("code = %d stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "--discussion-id") || !strings.Contains(stdout.String(), "GitLab Flavored Markdown") {
+		t.Fatalf("help = %s", stdout.String())
+	}
+}
+
 func TestRunUnknownHelpTopicReturnsJSONError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"help", "missing"}, strings.NewReader(""), &stdout, &stderr, nil)

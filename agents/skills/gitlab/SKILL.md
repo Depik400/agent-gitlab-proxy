@@ -56,11 +56,20 @@ gitlab-proxy add-mr-thread --repo group/project --mr-iid 123 --file internal/app
 
 `add-mr-thread` accepts inline GitLab Flavored Markdown only; it does not accept `--body-file`.
 
+- Reply to an existing discussion:
+
+```bash
+gitlab-proxy reply-mr-discussion --repo group/project --mr-iid 123 --discussion-id <discussion-id> --body "**Resolved:** fixed in 1a2b3c4."
+```
+
+Get `<discussion-id>` from `comments` or `mr-context` output.
+
 Add `--host-name <name>` to these commands only when no default host is configured or when the user requests a specific host.
 
 ## Rules
 
 - Preserve unrelated local changes.
+- Format every text value sent to GitLab as GitLab Flavored Markdown, including MR descriptions, general comments, discussion replies, and code-review threads. Plain text is valid Markdown; use headings, lists, code blocks, and links where they improve clarity.
 - Treat command stdout as JSON and stderr as structured JSON errors.
 - If GitLab returns `ambiguous_mr`, present the candidates and ask the user which MR IID to use.
 - Do not expose access tokens from `gitlab-proxy export --include-secrets` unless the user explicitly asks.

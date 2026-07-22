@@ -80,11 +80,22 @@ Format the body as GitLab Flavored Markdown. For multi-line content, write a `.m
 
 5. Report which selected comment numbers were posted and include the MR URL when available.
 
+## Reply to Existing Discussions
+
+When the user asks to answer an existing review discussion, use its `discussion_id` from `mr-context` or `comments`:
+
+```bash
+gitlab-proxy reply-mr-discussion --repo <repo> --mr-iid <iid> --discussion-id <discussion-id> --body "**Resolved:** <reply text>"
+```
+
+Do not create a general MR comment when the user asked for a reply to a specific discussion.
+
 ## Rules
 
 - Never publish unselected comments.
 - Never publish comments before showing the numbered list and receiving the user's selected numbers.
 - Prefer code-position threads over general MR comments when a safe changed-line position is available.
+- Format every text value sent to GitLab as GitLab Flavored Markdown, including thread bodies and discussion replies.
 - Preserve unrelated local changes.
 - Treat `gitlab-proxy` stdout as JSON and stderr as structured JSON errors.
 - Do not expose tokens from `gitlab-proxy export --include-secrets`.

@@ -50,6 +50,11 @@ gitlab-proxy add-mr-comment --repo <repo> --mr-iid <iid> --body-file <comment.md
 ```
 
    Format the file as GitLab Flavored Markdown and use the original MR IID resolved in step 6. Do not post a comment unless the user requested one.
+12. When the user asks to answer a particular reviewer discussion, use the `discussion_id` from step 6 instead of posting a general comment:
+
+```bash
+gitlab-proxy reply-mr-discussion --repo <repo> --mr-iid <iid> --discussion-id <discussion-id> --body "**Resolved:** <reply text>"
+```
 
 ## Rules
 
@@ -57,6 +62,7 @@ gitlab-proxy add-mr-comment --repo <repo> --mr-iid <iid> --body-file <comment.md
 - Do not create duplicate MRs; `create-mr` is idempotent for the same source and target branches.
 - Ask the user before choosing among ambiguous repositories, hosts, branches, or MR candidates.
 - Treat `gitlab-proxy` stdout as JSON. Treat JSON on stderr as structured failure details.
+- Format every text value sent to GitLab as GitLab Flavored Markdown, including MR descriptions, general comments, and discussion replies.
 - Do not expose tokens from `gitlab-proxy export --include-secrets` unless the user explicitly asks.
 
 ## Useful Commands
@@ -69,4 +75,5 @@ gitlab-proxy mr-context --repo group/project --branch feature
 gitlab-proxy mr-context --host-name Main --repo group/project --branch feature
 gitlab-proxy create-mr --repo group/project --source-branch feature-comments-fix --target-branch feature --title "Fix review comments for feature"
 gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body-file review-summary.md
+gitlab-proxy reply-mr-discussion --repo group/project --mr-iid 123 --discussion-id abc123 --body "**Resolved:** addressed in 1a2b3c4."
 ```

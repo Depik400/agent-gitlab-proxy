@@ -17,6 +17,7 @@ type GitLabClient interface {
 	ListDiffs(ctx context.Context, repo string, iid int) ([]gitlab.Diff, error)
 	CreateMergeRequest(ctx context.Context, repo string, input gitlab.CreateMergeRequestInput) (gitlab.MergeRequest, error)
 	AddMergeRequestNote(ctx context.Context, repo string, iid int, body string) (gitlab.Note, error)
+	ReplyToMergeRequestDiscussion(ctx context.Context, repo string, iid int, discussionID string, body string) (gitlab.Note, error)
 	CreateMergeRequestDiscussion(ctx context.Context, repo string, iid int, input gitlab.CreateMergeRequestDiscussionInput) (gitlab.Discussion, error)
 }
 
@@ -80,6 +81,13 @@ type CreateMergeRequestResult struct {
 type AddMergeRequestCommentResult struct {
 	Repo         string              `json:"repo"`
 	MergeRequest gitlab.MergeRequest `json:"merge_request"`
+	Note         gitlab.Note         `json:"note"`
+}
+
+type ReplyToMergeRequestDiscussionResult struct {
+	Repo         string              `json:"repo"`
+	MergeRequest gitlab.MergeRequest `json:"merge_request"`
+	DiscussionID string              `json:"discussion_id"`
 	Note         gitlab.Note         `json:"note"`
 }
 
@@ -219,6 +227,24 @@ func AddMergeRequestComment(ctx context.Context, client GitLabClient, repo strin
 		return AddMergeRequestCommentResult{}, err
 	}
 	return AddMergeRequestCommentResult{Repo: repo, MergeRequest: mr, Note: note}, nil
+}
+
+func ReplyToMergeRequestDiscussion(ctx context.Context, client GitLabClient, repo string, selector MRSelector, discussionID, body string) (ReplyToMergeRequestDiscussionResult, error) {
+	if discussionID == "" {
+		return ReplyToMergeRequestDiscussionResult{}, apperr.New(apperr.CodeInvalidArgs, "--discussion-id is required", nil)
+	}
+	if body == "" {
+		return ReplyToMergeRequestDiscussionResult{}, apperr.New(apperr.CodeInvalidArgs, "--body is required", nil)
+	}
+	mr, err := ResolveMR(ctx, client, repo, selector)
+	if err != nil {
+		return ReplyToMergeRequestDiscussionResult{}, err
+	}
+	note, err := client.ReplyToMergeRequestDiscussion(ctx, repo, mr.IID, discussionID, body)
+	if err != nil {
+		return ReplyToMergeRequestDiscussionResult{}, err
+	}
+	return ReplyToMergeRequestDiscussionResult{Repo: repo, MergeRequest: mr, DiscussionID: discussionID, Note: note}, nil
 }
 
 func AddMergeRequestThread(ctx context.Context, client GitLabClient, repo string, selector MRSelector, input AddMergeRequestThreadInput) (AddMergeRequestThreadResult, error) {

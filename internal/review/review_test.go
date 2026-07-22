@@ -52,6 +52,10 @@ func (f fakeClient) AddMergeRequestNote(context.Context, string, int, string) (g
 	return f.note, nil
 }
 
+func (f fakeClient) ReplyToMergeRequestDiscussion(context.Context, string, int, string, string) (gitlab.Note, error) {
+	return f.note, nil
+}
+
 func (f fakeClient) CreateMergeRequestDiscussion(context.Context, string, int, gitlab.CreateMergeRequestDiscussionInput) (gitlab.Discussion, error) {
 	return f.discussion, nil
 }
@@ -169,6 +173,19 @@ func TestAddMergeRequestComment(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.MergeRequest.IID != 12 || got.Note.ID != 99 {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestReplyToMergeRequestDiscussion(t *testing.T) {
+	got, err := ReplyToMergeRequestDiscussion(context.Background(), fakeClient{
+		mr:   gitlab.MergeRequest{IID: 12, WebURL: "https://gitlab.example.com/mr/12"},
+		note: gitlab.Note{ID: 100, Body: "**Done**"},
+	}, "group/project", MRSelector{MRIID: 12}, "discussion-1", "**Done**")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MergeRequest.IID != 12 || got.DiscussionID != "discussion-1" || got.Note.ID != 100 {
 		t.Fatalf("result = %+v", got)
 	}
 }

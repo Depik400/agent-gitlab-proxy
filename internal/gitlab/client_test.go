@@ -144,6 +144,32 @@ func TestAddMergeRequestNote(t *testing.T) {
 	}
 }
 
+func TestReplyToMergeRequestDiscussion(t *testing.T) {
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q", r.Method)
+		}
+		if r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/3/discussions/discussion-1/notes" {
+			t.Fatalf("path = %q", r.URL.EscapedPath())
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.Form.Get("body"); got != "**Done**" {
+			t.Fatalf("body = %q", got)
+		}
+		return jsonResponse(201, `{"id":100,"body":"**Done**"}`, ""), nil
+	})
+	client := NewClientWithHTTP("https://gitlab.example.com", "token", &http.Client{Transport: transport})
+	note, err := client.ReplyToMergeRequestDiscussion(context.Background(), "group/project", 3, "discussion-1", "**Done**")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note.ID != 100 || note.Body != "**Done**" {
+		t.Fatalf("note = %+v", note)
+	}
+}
+
 func TestListMergeRequestVersions(t *testing.T) {
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.EscapedPath() != "/api/v4/projects/group%2Fproject/merge_requests/3/versions" {

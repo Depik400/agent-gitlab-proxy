@@ -159,6 +159,18 @@ gitlab-proxy add-mr-comment \
   --body "## Review\n\nPlease add a test."
 ```
 
+Reply to an existing discussion thread:
+
+```bash
+gitlab-proxy reply-mr-discussion \
+  --repo group/project \
+  --mr-iid 123 \
+  --discussion-id discussion-id-from-mr-context \
+  --body "**Resolved:** fixed in 1a2b3c4."
+```
+
+Use `comments` or `mr-context` to get `discussion_id`. All text sent to GitLab is GitLab Flavored Markdown.
+
 MR comments support GitLab Flavored Markdown. For a multi-line comment, pass a Markdown file instead:
 
 ```bash

@@ -71,6 +71,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer, embeddedSkills map[st
 		return runCreateMR(args[1:], stdout)
 	case "add-mr-comment":
 		return runAddMRComment(args[1:], stdout)
+	case "reply-mr-discussion":
+		return runReplyMRDiscussion(args[1:], stdout)
 	case "add-mr-thread":
 		return runAddMRThread(args[1:], stdout)
 	case "install-skill":
@@ -342,6 +344,44 @@ func runAddMRComment(args []string, stdout io.Writer) error {
 	return output.JSON(stdout, result)
 }
 
+func runReplyMRDiscussion(args []string, stdout io.Writer) error {
+	fs := newFlagSet("reply-mr-discussion")
+	hostName := fs.String("host-name", "", "configured host name")
+	repo := fs.String("repo", "", "GitLab project path")
+	branch := fs.String("branch", "", "source branch")
+	mrIID := fs.String("mr-iid", "", "merge request IID")
+	discussionID := fs.String("discussion-id", "", "GitLab discussion ID")
+	body := fs.String("body", "", "reply body (GitLab Flavored Markdown)")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if *repo == "" {
+		return apperr.New(apperr.CodeInvalidArgs, "--repo is required", nil)
+	}
+	if (*branch == "" && *mrIID == "") || (*branch != "" && *mrIID != "") {
+		return apperr.New(apperr.CodeInvalidArgs, "exactly one of --branch or --mr-iid is required", nil)
+	}
+	iid := 0
+	if *mrIID != "" {
+		parsed, err := review.ParseMRIID(*mrIID)
+		if err != nil {
+			return err
+		}
+		iid = parsed
+	}
+	client, err := clientForHost(*hostName)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := review.ReplyToMergeRequestDiscussion(ctx, client, *repo, review.MRSelector{Branch: *branch, MRIID: iid}, *discussionID, *body)
+	if err != nil {
+		return err
+	}
+	return output.JSON(stdout, result)
+}
+
 func runAddMRThread(args []string, stdout io.Writer) error {
 	fs := newFlagSet("add-mr-thread")
 	hostName := fs.String("host-name", "", "configured host name")
@@ -555,6 +595,7 @@ Commands:
   mr-context  Print merge request metadata, diffs and comments as JSON.
   create-mr   Create or reuse an opened merge request.
   add-mr-comment Add a general comment to a merge request.
+  reply-mr-discussion Reply to an existing merge request discussion.
   add-mr-thread Add a code-position thread to a merge request.
   install-skill Install embedded Codex skills.
 
@@ -642,6 +683,14 @@ Add a general GitLab Flavored Markdown comment to a merge request. Pass inline M
 Example:
   gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body "## Review\n\nPlease add a test."
   gitlab-proxy add-mr-comment --repo group/project --mr-iid 123 --body-file review-comment.md
+`,
+	"reply-mr-discussion": `Usage:
+  gitlab-proxy reply-mr-discussion [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --discussion-id <id> --body <markdown>
+
+Reply to an existing merge request discussion with GitLab Flavored Markdown. Get the discussion ID from comments or mr-context. If --host-name is omitted, default_host from the config is used.
+
+Example:
+  gitlab-proxy reply-mr-discussion --repo group/project --mr-iid 123 --discussion-id abc123 --body "**Resolved:** fixed in 1a2b3c4."
 `,
 	"add-mr-thread": `Usage:
 	  gitlab-proxy add-mr-thread [--host-name <name>] --repo <project-path> (--branch <branch> | --mr-iid <iid>) --file <path> (--new-line <n> | --old-line <n>) --body <markdown> [--old-file <path>]

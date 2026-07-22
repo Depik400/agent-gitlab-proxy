@@ -279,6 +279,17 @@ func (c *Client) AddMergeRequestNote(ctx context.Context, repo string, iid int, 
 	return note, nil
 }
 
+func (c *Client) ReplyToMergeRequestDiscussion(ctx context.Context, repo string, iid int, discussionID string, body string) (Note, error) {
+	values := url.Values{}
+	values.Set("body", body)
+	var note Note
+	path := fmt.Sprintf("/projects/%s/merge_requests/%d/discussions/%s/notes", ProjectID(repo), iid, url.PathEscape(discussionID))
+	if err := c.postForm(ctx, path, values, &note); err != nil {
+		return Note{}, err
+	}
+	return note, nil
+}
+
 func (c *Client) CreateMergeRequestDiscussion(ctx context.Context, repo string, iid int, input CreateMergeRequestDiscussionInput) (Discussion, error) {
 	values := url.Values{}
 	values.Set("body", input.Body)
